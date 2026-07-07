@@ -1,0 +1,16 @@
+Manage the engagement task graph — a DAG of pentest tasks with dependencies, priorities, and agent assignments.
+
+Actions:
+- plan: Bulk-add tasks to the graph. data: { tasks: [{ id, description, assignedAgent?, priority?, target?, technique?, phase?, dependsOn?: string[] }] }
+- dispatch: Mark a task as dispatched to an agent. data: { id, assignedAgent?, sessionId? }
+- complete: Mark task completed with optional result. data: { id, result? }
+- fail: Mark task failed. data: { id, result? }
+- abandon: Mark task abandoned. data: { id }
+- list_ready: List tasks ready for dispatch (all deps completed).
+- list_all: List all tasks with status summary.
+- status: Quick status summary (counts per status).
+
+Task states: planned → ready (auto when deps complete) → dispatched → running → completed/failed/abandoned
+Tasks with failed/abandoned dependencies become "blocked".
+
+Use this tool to plan and track parallel pentest work. The pentest coordinator plans tasks, dispatches them to subagents, and tracks completion.

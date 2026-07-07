@@ -1,0 +1,1 @@
+View and manage the engagement phase. Check current phase and progress, advance to the next phase, or jump to a specific phase. Phases: recon -> enumeration -> vuln_assess -> exploitation -> post_exploit -> reporting.

@@ -1,0 +1,14 @@
+Query the current engagement state. Returns information about hosts, vulnerabilities, credentials, scope, phase, and other engagement data. Use this to understand the current state before planning next actions.
+
+Supported query types:
+- summary: Overview with counts (hosts, vulns, creds, flags, phase, mode)
+- hosts: List all discovered hosts with their services
+- vulns: List all vulnerabilities across all hosts (filter by severity)
+- creds: List all credentials (username + type + source, value redacted)
+- scope: Show target scope and exclusions
+- phase: Show current pentest phase and mode
+- flags: List captured flags
+- tasks: Show pending/in-progress task tree nodes
+- host: Show details for a specific host (set filter to the IP address)
+- full: Return full compact engagement context
+- engagements: List all saved engagements and which is currently loaded

@@ -1,0 +1,199 @@
+export * as EngagementSchema from "./schema"
+
+import { Schema } from "effect"
+
+export const ID = Schema.String.pipe(Schema.brand("Engagement.ID"))
+export type ID = typeof ID.Type
+
+export const Severity = Schema.Literals(["critical", "high", "medium", "low", "info"])
+export type Severity = typeof Severity.Type
+
+export const VulnStatus = Schema.Literals(["suspected", "confirmed", "exploited", "false_positive"])
+export type VulnStatus = typeof VulnStatus.Type
+
+export const AccessLevel = Schema.Literals(["none", "user", "root", "system"])
+export type AccessLevel = typeof AccessLevel.Type
+
+export const PentestPhase = Schema.Literals([
+  "recon",
+  "enumeration",
+  "vuln_assess",
+  "exploitation",
+  "post_exploit",
+  "reporting",
+])
+export type PentestPhase = typeof PentestPhase.Type
+
+export const PentestMode = Schema.Literals(["auto", "free", "guided"])
+export type PentestMode = typeof PentestMode.Type
+
+export const TaskNodeStatus = Schema.Literals(["pending", "in_progress", "done", "abandoned"])
+export type TaskNodeStatus = typeof TaskNodeStatus.Type
+
+export const Service = Schema.Struct({
+  port: Schema.Number,
+  protocol: Schema.optional(Schema.String),
+  service: Schema.optional(Schema.String),
+  version: Schema.optional(Schema.String),
+  state: Schema.optional(Schema.String),
+  banner: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Service" })
+export type Service = typeof Service.Type
+
+export const Vulnerability = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  title: Schema.String,
+  service_port: Schema.optional(Schema.Number),
+  severity: Schema.optional(Severity),
+  status: Schema.optional(VulnStatus),
+  description: Schema.optional(Schema.String),
+  evidence: Schema.optional(Schema.String),
+  references: Schema.optional(Schema.Array(Schema.String)),
+  mitre_attack_id: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Vulnerability" })
+export type Vulnerability = typeof Vulnerability.Type
+
+export const Credential = Schema.Struct({
+  id: Schema.String,
+  cred_type: Schema.optional(Schema.String),
+  username: Schema.optional(Schema.String),
+  value: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  valid_for: Schema.optional(Schema.Array(Schema.String)),
+}).annotate({ identifier: "Engagement.Credential" })
+export type Credential = typeof Credential.Type
+
+export const Access = Schema.Struct({
+  access_type: Schema.String,
+  username: Schema.String,
+  level: Schema.optional(AccessLevel),
+  credential_id: Schema.optional(Schema.String),
+  details: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Access" })
+export type Access = typeof Access.Type
+
+export const Host = Schema.Struct({
+  ip: Schema.String,
+  hostname: Schema.optional(Schema.String),
+  os: Schema.optional(Schema.String),
+  services: Schema.Array(Service),
+  vulns: Schema.Array(Vulnerability),
+  access: Schema.Array(Access),
+  notes: Schema.Array(Schema.String),
+}).annotate({ identifier: "Engagement.Host" })
+export type Host = typeof Host.Type
+
+export const AttackStep = Schema.Struct({
+  timestamp: Schema.String,
+  source: Schema.String,
+  target: Schema.String,
+  technique: Schema.String,
+  result: Schema.String,
+  success: Schema.optional(Schema.Boolean),
+  mitre_attack_id: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.AttackStep" })
+export type AttackStep = typeof AttackStep.Type
+
+export const Scope = Schema.Struct({
+  targets: Schema.Array(Schema.String),
+  excludes: Schema.Array(Schema.String),
+  notes: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Scope" })
+export type Scope = typeof Scope.Type
+
+export const TaskTreeNode = Schema.Struct({
+  id: Schema.String,
+  parent_id: Schema.optional(Schema.String),
+  description: Schema.String,
+  status: Schema.optional(TaskNodeStatus),
+  difficulty: Schema.optional(Schema.Number),
+  target: Schema.optional(Schema.String),
+  technique: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.TaskTreeNode" })
+export type TaskTreeNode = typeof TaskTreeNode.Type
+
+export const State = Schema.Struct({
+  id: ID,
+  name: Schema.String,
+  created_at: Schema.String,
+  updated_at: Schema.String,
+  scope: Scope,
+  hosts: Schema.Record(Schema.String, Host),
+  credentials: Schema.Record(Schema.String, Credential),
+  flags: Schema.Array(Schema.String),
+  attack_path: Schema.Array(AttackStep),
+  task_tree: Schema.Array(TaskTreeNode),
+  task_graph: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  current_phase: PentestPhase,
+  mode: PentestMode,
+  notes: Schema.Array(Schema.String),
+}).annotate({ identifier: "Engagement.State" })
+export type State = typeof State.Type
+
+export function summary(state: State) {
+  const hostCount = Object.keys(state.hosts).length
+  const compromised = Object.values(state.hosts).filter((h) => h.access.length > 0).length
+  const vulnCount = Object.values(state.hosts).reduce((sum, h) => sum + h.vulns.length, 0)
+  const credCount = Object.keys(state.credentials).length
+  const flagCount = state.flags.length
+  const uncheckedServices = Object.values(state.hosts).reduce(
+    (sum, h) => sum + h.services.filter((s) => !s.version).length,
+    0,
+  )
+  return {
+    hosts_discovered: hostCount,
+    hosts_compromised: compromised,
+    vulnerabilities: vulnCount,
+    credentials: credCount,
+    flags: flagCount,
+    attack_steps: state.attack_path.length,
+    unchecked_services: uncheckedServices,
+    current_phase: state.current_phase,
+    mode: state.mode,
+  }
+}
+
+export function toCompactContext(state: State, maxHosts = 20): string {
+  const s = summary(state)
+  const data: Record<string, unknown> = {
+    scope: { targets: state.scope.targets, excludes: state.scope.excludes },
+    summary: s,
+    phase: state.current_phase,
+    mode: state.mode,
+    hosts: {} as Record<string, unknown>,
+  }
+
+  const hostEntries = Object.entries(state.hosts).slice(0, maxHosts)
+  for (const [ip, host] of hostEntries) {
+    const h: Record<string, unknown> = {
+      services: host.services.map((svc) => ({
+        port: svc.port,
+        service: svc.service,
+        version: svc.version || undefined,
+      })),
+    }
+    if (host.hostname) h.hostname = host.hostname
+    if (host.os) h.os = host.os
+    if (host.vulns.length > 0)
+      h.vulns = host.vulns.map((v) => ({
+        title: v.title,
+        severity: v.severity,
+        status: v.status,
+      }))
+    if (host.access.length > 0)
+      h.access = host.access.map((a) => ({
+        type: a.access_type,
+        user: a.username,
+        level: a.level,
+      }))
+    ;(data.hosts as Record<string, unknown>)[ip] = h
+  }
+
+  if (state.flags.length > 0) data.flags = state.flags
+  if (state.task_tree.length > 0) {
+    const pending = state.task_tree.filter((t) => t.status === "pending" || t.status === "in_progress")
+    if (pending.length > 0) data.pending_tasks = pending.map((t) => ({ id: t.id, desc: t.description, target: t.target }))
+  }
+
+  return JSON.stringify(data, undefined, 2)
+}

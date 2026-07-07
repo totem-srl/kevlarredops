@@ -1,0 +1,17 @@
+Update the engagement state. Add hosts, vulnerabilities, credentials, access entries, manage scope, phases, and engagement lifecycle. Changes are persisted to disk immediately.
+
+Actions and their required data fields:
+
+- create_engagement: { name: string }
+- load_engagement: { name: string }
+- reload_engagement: {} (reloads current engagement from disk)
+- add_host: { ip: string, hostname?: string, os?: string, services?: Array<{ port: number, protocol?: string, service?: string, version?: string, state?: string, banner?: string }> }
+- add_vuln: { host_ip: string, title: string, severity?: "critical"|"high"|"medium"|"low"|"info", status?: "suspected"|"confirmed"|"exploited"|"false_positive", description?: string, evidence?: string, service_port?: number, references?: string[], mitre_attack_id?: string }
+- add_credential: { id: string, cred_type?: string, username: string, value: string, source?: string, valid_for?: string[] }
+- add_access: { host_ip: string, access_type: string, username: string, level?: "none"|"user"|"root"|"system", credential_id?: string, details?: string }
+- set_phase: { phase: "recon"|"enumeration"|"vuln_assess"|"exploitation"|"post_exploit"|"reporting" }
+- set_mode: { mode: "auto"|"free"|"guided" }
+- update_scope: { targets?: string[], excludes?: string[], notes?: string }
+- add_flag: { flag: string }
+- add_note: { note: string }
+- add_attack_step: { source: string, target: string, technique: string, result: string, success?: boolean, mitre_attack_id?: string }
