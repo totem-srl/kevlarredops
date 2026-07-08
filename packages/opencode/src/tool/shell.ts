@@ -21,9 +21,6 @@ import { ChildProcess } from "effect/unstable/process"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
 import { ShellPrompt, type Parameters } from "./shell/prompt"
 import { BashArity } from "@/permission/arity"
-import { checkCommandScope, ScopeViolationError } from "./scope-guard"
-import { EngagementStore } from "@opencode-ai/core/engagement/store"
-import { EventV2Bridge } from "@/event-v2-bridge"
 
 export { Parameters } from "./shell/prompt"
 
@@ -347,8 +344,6 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
-    const engagementStore = yield* EngagementStore.Service
-    const evtBridge = yield* EventV2Bridge.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -613,21 +608,6 @@ export const ShellTool = Tool.define(
           parameters: prompt.parameters,
           execute: (params: Parameters, ctx: Tool.Context) =>
             Effect.gen(function* () {
-              const scopeViolation = yield* checkCommandScope(params.command, engagementStore, evtBridge).pipe(
-                Effect.as(null),
-                Effect.catchTag("ScopeViolationError", (e) => Effect.succeed(e)),
-              )
-              if (scopeViolation) {
-                return {
-                  title: "BLOCKED",
-                  metadata: {
-                    output: scopeViolation.message,
-                    exit: 1,
-                    truncated: false,
-                  },
-                  output: scopeViolation.message,
-                }
-              }
               const instanceCtx = yield* InstanceState.context
               const cwd = params.workdir
                 ? yield* resolvePath(params.workdir, instanceCtx.directory, shell)

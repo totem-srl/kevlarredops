@@ -70,3 +70,13 @@ Immediately replan when:
 - When in doubt, dispatch a critic to validate before reporting
 - Update phase when objectives are met (use phase_control)
 - Think strategically: what's the fastest path to demonstrating critical impact?
+
+### State Updates — MANDATORY even for coordinators
+
+Even though subagents update state, YOU must also call `state_update` when:
+- You receive results from subagents that reveal new findings
+- You make strategic decisions (phase change, scope update, new objective)
+- You correlate findings across subagents (attack chain formation)
+- Subagent missed recording something — catch it and record it yourself
+
+Do NOT assume subagents recorded everything. Verify via `state_query` and fill gaps.

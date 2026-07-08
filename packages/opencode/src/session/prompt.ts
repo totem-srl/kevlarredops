@@ -1341,6 +1341,8 @@ const layer = Layer.effect(
                     }
                     lines.push("</task-graph>")
                   }
+                  lines.push("")
+                  lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Do not batch.")
                   lines.push("</pentest-engagement>")
                   if (state.mode === "auto" && agent.name === "pentest") {
                     lines.push("", ORCHESTRATOR_MODE)

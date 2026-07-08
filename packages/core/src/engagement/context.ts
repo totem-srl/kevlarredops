@@ -22,10 +22,16 @@ interface ContextValue {
 }
 
 function formatBaseline(value: ContextValue): string {
+  let objLine = ""
+  try {
+    const parsed = JSON.parse(value.compact)
+    if (parsed.objectives_progress) objLine = `  Objectives: ${parsed.objectives_progress}`
+  } catch {}
   const lines = [
     "<pentest-engagement>",
     `  Phase: ${value.phase}`,
     `  Mode: ${value.mode}`,
+    ...(objLine ? [objLine] : []),
     "",
     "Current engagement state:",
     value.compact,

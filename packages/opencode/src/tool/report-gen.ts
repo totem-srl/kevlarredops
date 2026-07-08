@@ -21,6 +21,7 @@ export const Parameters = Schema.Struct({
 
 const ALL_SECTIONS = [
   "executive_summary",
+  "objectives",
   "scope",
   "findings",
   "attack_path",
@@ -67,6 +68,9 @@ function generateExecutiveSummary(state: EngagementSchema.State): string {
   )
   lines.push(`- **Credentials Obtained**: ${stats.credentials}`)
   lines.push(`- **Flags Captured**: ${stats.flags}`)
+  if (stats.objectives_total > 0) {
+    lines.push(`- **Objectives**: ${stats.objectives_completed}/${stats.objectives_total} completed`)
+  }
 
   return lines.join("\n")
 }
@@ -244,8 +248,51 @@ function generateRecommendations(state: EngagementSchema.State): string {
   return lines.join("\n")
 }
 
+function generateObjectives(state: EngagementSchema.State): string {
+  const lines: string[] = []
+  lines.push("## Objectives")
+  lines.push("")
+
+  const objectives = state.objectives ? Object.values(state.objectives) : []
+  if (objectives.length === 0) {
+    lines.push("No objectives were defined for this engagement.")
+    return lines.join("\n")
+  }
+
+  const completed = objectives.filter((o) => o.status === "completed").length
+  lines.push(`**Progress**: ${completed} of ${objectives.length} objectives completed`)
+  lines.push("")
+
+  const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+  const sorted = [...objectives].sort(
+    (a, b) => (priorityOrder[a.priority ?? "medium"] ?? 2) - (priorityOrder[b.priority ?? "medium"] ?? 2),
+  )
+
+  for (const obj of sorted) {
+    const statusIcon =
+      obj.status === "completed" ? "[COMPLETED]" :
+      obj.status === "blocked" ? "[BLOCKED]" :
+      obj.status === "in_progress" ? "[IN PROGRESS]" :
+      obj.status === "abandoned" ? "[ABANDONED]" : "[NOT STARTED]"
+    lines.push(`### ${obj.title}`)
+    lines.push(`- **ID**: ${obj.id}`)
+    lines.push(`- **Status**: ${statusIcon}`)
+    if (obj.priority) lines.push(`- **Priority**: ${obj.priority}`)
+    if (obj.category) lines.push(`- **Category**: ${obj.category}`)
+    if (obj.description) lines.push(`- **Description**: ${obj.description}`)
+    if (obj.target_hosts && obj.target_hosts.length > 0) lines.push(`- **Target Hosts**: ${obj.target_hosts.join(", ")}`)
+    if (obj.flags && obj.flags.length > 0) lines.push(`- **Flags**: ${obj.flags.join(", ")}`)
+    if (obj.evidence) lines.push(`- **Evidence**: ${obj.evidence}`)
+    if (obj.notes) lines.push(`- **Notes**: ${obj.notes}`)
+    lines.push("")
+  }
+
+  return lines.join("\n")
+}
+
 const sectionGenerators: Record<SectionName, (state: EngagementSchema.State) => string> = {
   executive_summary: generateExecutiveSummary,
+  objectives: generateObjectives,
   scope: generateScope,
   findings: generateFindings,
   attack_path: generateAttackPath,

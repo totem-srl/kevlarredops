@@ -191,6 +191,42 @@ function parseGreppable(content: string): ParsedHost[] {
   return hosts
 }
 
+const SERVICE_SKILL_MAP: Record<string, string> = {
+  http: "svc-web-server",
+  https: "svc-web-server",
+  "http-proxy": "svc-web-server",
+  ssh: "svc-ssh",
+  ftp: "svc-ftp",
+  smtp: "svc-mail",
+  pop3: "svc-mail",
+  imap: "svc-mail",
+  smb: "svc-smb",
+  "microsoft-ds": "svc-smb",
+  "netbios-ssn": "svc-smb",
+  mysql: "svc-database",
+  postgresql: "svc-database",
+  "ms-sql-s": "svc-database",
+  redis: "svc-database",
+  mongodb: "svc-database",
+  dns: "svc-dns",
+  domain: "svc-dns",
+  docker: "svc-docker-k8s",
+  "kubernetes-api": "svc-docker-k8s",
+  jenkins: "svc-cicd",
+  gitlab: "svc-cicd",
+}
+
+function suggestSkills(hosts: ParsedHost[]): string[] {
+  const skills = new Set<string>()
+  for (const host of hosts) {
+    for (const svc of host.services) {
+      const skill = SERVICE_SKILL_MAP[svc.service.toLowerCase()]
+      if (skill) skills.add(skill)
+    }
+  }
+  return [...skills]
+}
+
 function formatOutput(hosts: ParsedHost[], autoUpdated: boolean, serviceCount: number): string {
   const lines: string[] = []
   lines.push(`Parsed ${hosts.length} host${hosts.length !== 1 ? "s" : ""}, ${serviceCount} service${serviceCount !== 1 ? "s" : ""} from nmap output`)
@@ -324,6 +360,12 @@ export const NmapParseTool = Tool.define(
             if (updatedState) yield* store.save(updatedState)
           }
 
+          const recommended = suggestSkills(hosts)
+          let output = formatOutput(hosts, shouldUpdate, totalServices)
+          if (recommended.length > 0) {
+            output += `\n\nRelevant service skills available: ${recommended.map((s) => `"${s}"`).join(", ")}. Load via the skill tool for service-specific attack techniques.`
+          }
+
           return {
             title: `nmap: ${hosts.length} hosts, ${totalServices} services`,
             metadata: {
@@ -332,7 +374,7 @@ export const NmapParseTool = Tool.define(
               format,
               auto_updated: shouldUpdate,
             },
-            output: formatOutput(hosts, shouldUpdate, totalServices),
+            output,
           }
         }).pipe(Effect.orDie),
     }

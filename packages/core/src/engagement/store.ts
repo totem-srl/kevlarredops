@@ -27,6 +27,9 @@ export interface Interface {
   readonly updateScope: (scope: Partial<EngagementSchema.Scope>) => Effect.Effect<void>
   readonly getTaskGraph: () => Effect.Effect<TaskGraph.TaskNodes>
   readonly setTaskGraph: (tasks: TaskGraph.TaskNodes) => Effect.Effect<void>
+  readonly addObjective: (objective: EngagementSchema.Objective) => Effect.Effect<void>
+  readonly updateObjective: (id: string, patch: Record<string, unknown>) => Effect.Effect<void>
+  readonly completeObjective: (id: string, evidence?: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -187,6 +190,37 @@ const layer = Layer.effect(
         const current = yield* Ref.get(stateRef)
         if (!current) return
         yield* Ref.set(stateRef, { ...current, task_graph: tasks as unknown as Record<string, unknown> })
+      }),
+
+      addObjective: Effect.fn("EngagementStore.addObjective")(function* (objective) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const objectives = current.objectives ?? {}
+        yield* Ref.set(stateRef, { ...current, objectives: { ...objectives, [objective.id]: objective } })
+      }),
+
+      updateObjective: Effect.fn("EngagementStore.updateObjective")(function* (id, patch) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const objectives = current.objectives ?? {}
+        const existing = objectives[id]
+        if (!existing) return
+        yield* Ref.set(stateRef, { ...current, objectives: { ...objectives, [id]: { ...existing, ...patch } } })
+      }),
+
+      completeObjective: Effect.fn("EngagementStore.completeObjective")(function* (id, evidence) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const objectives = current.objectives ?? {}
+        const existing = objectives[id]
+        if (!existing) return
+        yield* Ref.set(stateRef, {
+          ...current,
+          objectives: {
+            ...objectives,
+            [id]: { ...existing, status: "completed" as const, ...(evidence !== undefined ? { evidence } : {}) },
+          },
+        })
       }),
     })
   }),

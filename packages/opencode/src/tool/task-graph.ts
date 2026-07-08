@@ -44,12 +44,13 @@ export const TaskGraphTool = Tool.define(
     return {
       description: DESCRIPTION,
       parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context) =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
         Effect.gen(function* () {
           const state = yield* store.get()
           if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
 
-          const d = (params.data ?? {}) as Record<string, any>
+          const raw = params.data ?? {}
+          const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
 
           switch (params.action) {
             case "plan": {

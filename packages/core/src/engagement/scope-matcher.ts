@@ -75,6 +75,28 @@ const IGNORE_DOMAINS = new Set([
   "apt.get", "pip.install",
 ])
 
+const FILE_EXTENSIONS = new Set([
+  "txt", "html", "htm", "json", "xml", "csv", "yaml", "yml", "toml",
+  "py", "sh", "bash", "zsh", "rb", "pl", "js", "ts", "go", "rs", "c", "cpp", "h",
+  "conf", "cfg", "ini", "log", "md", "rst", "tex",
+  "png", "jpg", "jpeg", "gif", "svg", "ico", "bmp", "webp",
+  "zip", "tar", "gz", "bz2", "xz", "rar",
+  "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+  "key", "pem", "crt", "csr", "der", "p12", "pfx",
+  "db", "sql", "sqlite", "bak", "tmp", "swp", "lock",
+  "exe", "dll", "so", "dylib", "bin", "elf", "msi",
+  "body", "out", "err", "pid", "sock", "fifo",
+  "nse", "rules", "cap", "pcap", "pcapng",
+  "php", "asp", "aspx", "jsp", "cgi",
+])
+
+function looksLikeFilename(s: string): boolean {
+  const dot = s.lastIndexOf(".")
+  if (dot <= 0) return false
+  const ext = s.slice(dot + 1).toLowerCase()
+  return FILE_EXTENSIONS.has(ext)
+}
+
 export function extractTargetsFromCommand(command: string): string[] {
   const targets = new Set<string>()
 
@@ -86,7 +108,12 @@ export function extractTargetsFromCommand(command: string): string[] {
 
   for (const match of command.matchAll(DOMAIN_RE)) {
     const domain = match[0]!.toLowerCase()
-    if (!IGNORE_DOMAINS.has(domain) && domain.includes(".")) {
+    if (
+      !IGNORE_DOMAINS.has(domain) &&
+      domain.includes(".") &&
+      !looksLikeFilename(domain) &&
+      (domain.split(".").length > 2 || domain.split(".").pop()!.length <= 6)
+    ) {
       targets.add(domain)
     }
   }

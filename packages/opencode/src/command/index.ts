@@ -17,6 +17,7 @@ import PROMPT_SCOPE from "./template/pentest-scope.txt"
 import PROMPT_PHASE from "./template/pentest-phase.txt"
 import PROMPT_MODE from "./template/pentest-mode.txt"
 import PROMPT_REPORT from "./template/pentest-report.txt"
+import PROMPT_OBJECTIVES from "./template/pentest-objectives.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
@@ -62,6 +63,7 @@ export const Default = {
   PHASE: "phase",
   MODE: "mode",
   REPORT: "report",
+  OBJECTIVES: "objectives",
 } as const
 
 export interface Interface {
@@ -158,6 +160,13 @@ const layer = Layer.effect(
         source: "command",
         template: PROMPT_REPORT,
         hints: hints(PROMPT_REPORT),
+      }
+      commands[Default.OBJECTIVES] = {
+        name: Default.OBJECTIVES,
+        description: "show or manage engagement objectives [filter|add|complete]",
+        source: "command",
+        template: PROMPT_OBJECTIVES,
+        hints: hints(PROMPT_OBJECTIVES),
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {

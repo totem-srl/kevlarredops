@@ -1,4 +1,6 @@
-Update the engagement state. Add hosts, vulnerabilities, credentials, access entries, manage scope, phases, and engagement lifecycle. Changes are persisted to disk immediately.
+Update the engagement state. IMPORTANT: Call this IMMEDIATELY after discovering any host, service, vulnerability, credential, or access. Do not batch updates — call once per discovery, in the SAME response as the finding. Every finding that is not recorded here is LOST.
+
+Changes are persisted to disk immediately.
 
 Actions and their required data fields:
 
@@ -15,3 +17,6 @@ Actions and their required data fields:
 - add_flag: { flag: string }
 - add_note: { note: string }
 - add_attack_step: { source: string, target: string, technique: string, result: string, success?: boolean, mitre_attack_id?: string }
+- add_objective: { id: string, title: string, description?: string, status?: "not_started"|"in_progress"|"completed"|"blocked"|"abandoned", priority?: "critical"|"high"|"medium"|"low", category?: "ctf"|"pentest"|"bounty"|"red_team"|"custom", target_hosts?: string[], linked_vulns?: string[], linked_creds?: string[], flags?: string[], evidence?: string, notes?: string }
+- update_objective: { id: string, ...any fields from add_objective to patch }
+- complete_objective: { id: string, evidence?: string }

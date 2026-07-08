@@ -30,6 +30,15 @@ export type PentestMode = typeof PentestMode.Type
 export const TaskNodeStatus = Schema.Literals(["pending", "in_progress", "done", "abandoned"])
 export type TaskNodeStatus = typeof TaskNodeStatus.Type
 
+export const ObjectiveStatus = Schema.Literals(["not_started", "in_progress", "completed", "blocked", "abandoned"])
+export type ObjectiveStatus = typeof ObjectiveStatus.Type
+
+export const ObjectivePriority = Schema.Literals(["critical", "high", "medium", "low"])
+export type ObjectivePriority = typeof ObjectivePriority.Type
+
+export const ObjectiveCategory = Schema.Literals(["ctf", "pentest", "bounty", "red_team", "custom"])
+export type ObjectiveCategory = typeof ObjectiveCategory.Type
+
 export const Service = Schema.Struct({
   port: Schema.Number,
   protocol: Schema.optional(Schema.String),
@@ -94,6 +103,22 @@ export const AttackStep = Schema.Struct({
 }).annotate({ identifier: "Engagement.AttackStep" })
 export type AttackStep = typeof AttackStep.Type
 
+export const Objective = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  status: ObjectiveStatus,
+  priority: Schema.optional(ObjectivePriority),
+  category: Schema.optional(ObjectiveCategory),
+  target_hosts: Schema.optional(Schema.Array(Schema.String)),
+  linked_vulns: Schema.optional(Schema.Array(Schema.String)),
+  linked_creds: Schema.optional(Schema.Array(Schema.String)),
+  flags: Schema.optional(Schema.Array(Schema.String)),
+  evidence: Schema.optional(Schema.String),
+  notes: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Objective" })
+export type Objective = typeof Objective.Type
+
 export const Scope = Schema.Struct({
   targets: Schema.Array(Schema.String),
   excludes: Schema.Array(Schema.String),
@@ -124,6 +149,7 @@ export const State = Schema.Struct({
   attack_path: Schema.Array(AttackStep),
   task_tree: Schema.Array(TaskTreeNode),
   task_graph: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+  objectives: Schema.optional(Schema.Record(Schema.String, Objective)),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -140,6 +166,7 @@ export function summary(state: State) {
     (sum, h) => sum + h.services.filter((s) => !s.version).length,
     0,
   )
+  const objectives = state.objectives ? Object.values(state.objectives) : []
   return {
     hosts_discovered: hostCount,
     hosts_compromised: compromised,
@@ -150,6 +177,10 @@ export function summary(state: State) {
     unchecked_services: uncheckedServices,
     current_phase: state.current_phase,
     mode: state.mode,
+    objectives_total: objectives.length,
+    objectives_completed: objectives.filter((o) => o.status === "completed").length,
+    objectives_in_progress: objectives.filter((o) => o.status === "in_progress").length,
+    objectives_blocked: objectives.filter((o) => o.status === "blocked").length,
   }
 }
 
@@ -193,6 +224,23 @@ export function toCompactContext(state: State, maxHosts = 20): string {
   if (state.task_tree.length > 0) {
     const pending = state.task_tree.filter((t) => t.status === "pending" || t.status === "in_progress")
     if (pending.length > 0) data.pending_tasks = pending.map((t) => ({ id: t.id, desc: t.description, target: t.target }))
+  }
+
+  if (state.objectives) {
+    const objs = Object.values(state.objectives)
+    if (objs.length > 0) {
+      data.objectives = objs.map((o) => {
+        const compact: Record<string, unknown> = { id: o.id, title: o.title, status: o.status }
+        if (o.priority) compact.priority = o.priority
+        if (o.category) compact.category = o.category
+        if (o.target_hosts && o.target_hosts.length > 0) compact.target_hosts = o.target_hosts
+        if (o.flags && o.flags.length > 0) compact.flags = o.flags
+        if (o.evidence) compact.evidence = o.evidence
+        return compact
+      })
+      const completed = objs.filter((o) => o.status === "completed").length
+      data.objectives_progress = `${completed}/${objs.length} completed`
+    }
   }
 
   return JSON.stringify(data, undefined, 2)

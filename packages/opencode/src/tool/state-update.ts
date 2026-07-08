@@ -21,6 +21,9 @@ export const Parameters = Schema.Struct({
     "create_engagement",
     "load_engagement",
     "reload_engagement",
+    "add_objective",
+    "update_objective",
+    "complete_objective",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -33,7 +36,8 @@ const NO_ENGAGEMENT = "No engagement loaded. Use create_engagement or load_engag
 
 function countsLine(state: EngagementSchema.State): string {
   const s = EngagementSchema.summary(state)
-  return `[${state.name}] phase:${s.current_phase} hosts:${s.hosts_discovered} vulns:${s.vulnerabilities} creds:${s.credentials} flags:${s.flags}`
+  const objStr = s.objectives_total > 0 ? ` obj:${s.objectives_completed}/${s.objectives_total}` : ""
+  return `[${state.name}] phase:${s.current_phase} hosts:${s.hosts_discovered} vulns:${s.vulnerabilities} creds:${s.credentials} flags:${s.flags}${objStr}`
 }
 
 export const StateUpdateTool = Tool.define(
@@ -46,7 +50,8 @@ export const StateUpdateTool = Tool.define(
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
         Effect.gen(function* () {
-          const d = (params.data ?? {}) as Record<string, any>
+          const raw = params.data ?? {}
+          const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
 
           switch (params.action) {
             // --- Lifecycle ---
@@ -385,6 +390,123 @@ export const StateUpdateTool = Tool.define(
                 title: `Attack: ${technique}`,
                 metadata: { source, target, technique, success: step.success },
                 output: `Attack step recorded: ${source} -> ${target} via ${technique} (${step.success ? "SUCCESS" : "FAILED"}): ${result}${step.mitre_attack_id ? ` [${step.mitre_attack_id}]` : ""}\n${countsLine(updated)}`,
+              }
+            }
+
+            case "add_objective": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              const title = d.title as string
+              if (!id || !title) {
+                return { title: "Error", metadata: {}, output: "Error: data.id and data.title are required for add_objective." }
+              }
+              const objective: EngagementSchema.Objective = {
+                id,
+                title,
+                description: d.description as string | undefined,
+                status: (d.status as EngagementSchema.ObjectiveStatus) || "not_started",
+                priority: d.priority as EngagementSchema.ObjectivePriority | undefined,
+                category: d.category as EngagementSchema.ObjectiveCategory | undefined,
+                target_hosts: d.target_hosts as string[] | undefined,
+                linked_vulns: d.linked_vulns as string[] | undefined,
+                linked_creds: d.linked_creds as string[] | undefined,
+                flags: d.flags as string[] | undefined,
+                evidence: d.evidence as string | undefined,
+                notes: d.notes as string | undefined,
+              }
+              yield* store.addObjective(objective)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              yield* events.publish(PentestEvent.ObjectiveAdded, {
+                timestamp: Date.now(),
+                engagementID: state.id,
+                objectiveId: id,
+                title,
+                priority: objective.priority,
+                category: objective.category,
+              })
+              return {
+                title: `Objective: ${title}`,
+                metadata: { id, priority: objective.priority },
+                output: `Objective added: [${id}] "${title}" (${objective.status})${objective.priority ? ` priority:${objective.priority}` : ""}${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "update_objective": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for update_objective." }
+              }
+              const objectives = state.objectives ?? {}
+              if (!objectives[id]) {
+                const available = Object.keys(objectives)
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output: `Objective "${id}" not found.${available.length > 0 ? ` Known: ${available.join(", ")}` : " No objectives defined."}`,
+                }
+              }
+              const patch: Record<string, unknown> = {}
+              if (d.title !== undefined) patch.title = d.title
+              if (d.description !== undefined) patch.description = d.description
+              if (d.status !== undefined) patch.status = d.status
+              if (d.priority !== undefined) patch.priority = d.priority
+              if (d.category !== undefined) patch.category = d.category
+              if (d.target_hosts !== undefined) patch.target_hosts = d.target_hosts
+              if (d.linked_vulns !== undefined) patch.linked_vulns = d.linked_vulns
+              if (d.linked_creds !== undefined) patch.linked_creds = d.linked_creds
+              if (d.flags !== undefined) patch.flags = d.flags
+              if (d.evidence !== undefined) patch.evidence = d.evidence
+              if (d.notes !== undefined) patch.notes = d.notes
+              yield* store.updateObjective(id, patch)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              const changedFields = Object.keys(patch).join(", ")
+              yield* events.publish(PentestEvent.ObjectiveUpdated, {
+                timestamp: Date.now(),
+                engagementID: state.id,
+                objectiveId: id,
+                field: changedFields,
+                newValue: JSON.stringify(patch),
+              })
+              return {
+                title: `Objective updated: ${id}`,
+                metadata: { id, changed: changedFields },
+                output: `Objective "${id}" updated (${changedFields}).${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "complete_objective": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for complete_objective." }
+              }
+              const objectives = state.objectives ?? {}
+              if (!objectives[id]) {
+                return { title: "Error", metadata: {}, output: `Objective "${id}" not found.` }
+              }
+              const evidence = d.evidence as string | undefined
+              yield* store.completeObjective(id, evidence)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              const obj = objectives[id]!
+              const completedCount = Object.values(updated?.objectives ?? {}).filter((o) => o.status === "completed").length
+              const totalCount = Object.keys(updated?.objectives ?? {}).length
+              yield* events.publish(PentestEvent.ObjectiveCompleted, {
+                timestamp: Date.now(),
+                engagementID: state.id,
+                objectiveId: id,
+                title: obj.title,
+              })
+              return {
+                title: `Objective completed: ${obj.title}`,
+                metadata: { id, completed: completedCount, total: totalCount },
+                output: `Objective "${obj.title}" [${id}] COMPLETED.${evidence ? ` Evidence: ${evidence}` : ""}\nProgress: ${completedCount}/${totalCount} objectives.${updated ? `\n${countsLine(updated)}` : ""}`,
               }
             }
 

@@ -17,9 +17,10 @@ export const Parameters = Schema.Struct({
     "host",
     "full",
     "engagements",
+    "objectives",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host (single host), full (compact context), engagements (list all)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -104,6 +105,7 @@ export const StateQueryTool = Tool.define(
                 `Attack steps: ${s.attack_steps}`,
                 `Unchecked services: ${s.unchecked_services}`,
                 `Scope: ${state.scope.targets.length} targets, ${state.scope.excludes.length} excludes`,
+                `Objectives: ${s.objectives_completed}/${s.objectives_total} completed`,
               ]
               return { title: "Summary", metadata: s, output: lines.join("\n") }
             }
@@ -231,6 +233,45 @@ export const StateQueryTool = Tool.define(
                 }
               }
               return { title: `Host ${params.filter}`, metadata: {}, output: formatHost(params.filter, host) }
+            }
+
+            case "objectives": {
+              const objectives = state.objectives ? Object.values(state.objectives) : []
+              if (objectives.length === 0) {
+                return { title: "Objectives", metadata: { count: 0 }, output: "No objectives defined. Add with state_update (action: add_objective)." }
+              }
+              let filtered = objectives
+              if (params.filter) {
+                filtered = objectives.filter((o) =>
+                  o.status === params.filter ||
+                  o.priority === params.filter ||
+                  o.category === params.filter ||
+                  o.id === params.filter,
+                )
+              }
+              const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+              const statusOrder: Record<string, number> = { in_progress: 0, not_started: 1, blocked: 2, completed: 3, abandoned: 4 }
+              filtered.sort((a, b) => {
+                const pa = priorityOrder[a.priority ?? "medium"] ?? 2
+                const pb = priorityOrder[b.priority ?? "medium"] ?? 2
+                if (pa !== pb) return pa - pb
+                return (statusOrder[a.status] ?? 5) - (statusOrder[b.status] ?? 5)
+              })
+              const lines = filtered.map((o) => {
+                const parts = [`  [${o.status.toUpperCase()}] ${o.id}: ${o.title}`]
+                if (o.priority) parts.push(`    priority: ${o.priority}`)
+                if (o.target_hosts && o.target_hosts.length > 0) parts.push(`    targets: ${o.target_hosts.join(", ")}`)
+                if (o.flags && o.flags.length > 0) parts.push(`    flags: ${o.flags.join(", ")}`)
+                if (o.evidence) parts.push(`    evidence: ${o.evidence}`)
+                return parts.join("\n")
+              })
+              const completed = objectives.filter((o) => o.status === "completed").length
+              const label = params.filter ? `Objectives [${params.filter}]` : "Objectives"
+              return {
+                title: label,
+                metadata: { count: filtered.length, total: objectives.length, completed },
+                output: `${label} (${completed}/${objectives.length} completed):\n\n${lines.join("\n\n")}`,
+              }
             }
 
             case "full": {

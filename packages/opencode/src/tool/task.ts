@@ -96,15 +96,12 @@ export const TaskTool = Tool.define(
       ctx: Tool.Context,
     ) {
       const cfg = yield* config.get()
-      const runInBackground = params.background === true
-      if (runInBackground && !flags.experimentalBackgroundSubagents) {
-        const engState = yield* engagementStore.get()
-        const isOrchestratorAuto = ctx.agent === "pentest" && engState?.mode === "auto"
-        if (!isOrchestratorAuto) {
-          return yield* Effect.fail(
-            new Error("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
-          )
-        }
+      const isPentestCoordinator = ctx.agent === "pentest" || ctx.agent === "recon"
+      const runInBackground = params.background === true || (params.background !== false && isPentestCoordinator)
+      if (runInBackground && !flags.experimentalBackgroundSubagents && !isPentestCoordinator) {
+        return yield* Effect.fail(
+          new Error("Background subagents require OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS=true"),
+        )
       }
 
       if (!ctx.extra?.bypassAgentCheck) {

@@ -15,6 +15,15 @@ const PHASE_ORDER: EngagementSchema.PentestPhase[] = [
   "reporting",
 ]
 
+const PHASE_SKILLS: Record<string, string> = {
+  recon: "recon-phase",
+  enumeration: "enumeration-phase",
+  vuln_assess: "vuln-assessment-phase",
+  exploitation: "exploitation-phase",
+  post_exploit: "post-exploit-phase",
+  reporting: "reporting-phase",
+}
+
 export const Parameters = Schema.Struct({
   action: Schema.Literals(["status", "next", "set"]),
   phase: Schema.optional(
@@ -98,10 +107,13 @@ export const PhaseControlTool = Tool.define(
               from: state.current_phase,
               to: nextPhase,
             })
+            const skillHint = PHASE_SKILLS[nextPhase]
+              ? `\n\nLoad phase knowledge: use the skill tool with name="${PHASE_SKILLS[nextPhase]}" for ${nextPhase} methodology, checklists, and tools.`
+              : ""
             return {
               title: `Phase: ${nextPhase}`,
               metadata: { phase: nextPhase, previous: state.current_phase, mode: state.mode },
-              output: `Advanced from ${state.current_phase} to ${nextPhase}.\n\n${formatStatus(updated ?? { ...state, current_phase: nextPhase })}`,
+              output: `Advanced from ${state.current_phase} to ${nextPhase}.\n\n${formatStatus(updated ?? { ...state, current_phase: nextPhase })}${skillHint}`,
             }
           }
 
@@ -125,10 +137,13 @@ export const PhaseControlTool = Tool.define(
               to: params.phase,
             })
           }
+          const setSkillHint = state.current_phase !== params.phase && PHASE_SKILLS[params.phase]
+            ? `\n\nLoad phase knowledge: use the skill tool with name="${PHASE_SKILLS[params.phase]}" for ${params.phase} methodology, checklists, and tools.`
+            : ""
           return {
             title: `Phase: ${params.phase}`,
             metadata: { phase: params.phase, previous: state.current_phase, mode: state.mode },
-            output: `Phase set to ${params.phase}${state.current_phase !== params.phase ? ` (was ${state.current_phase})` : ""}.\n\n${formatStatus(updated ?? { ...state, current_phase: params.phase })}`,
+            output: `Phase set to ${params.phase}${state.current_phase !== params.phase ? ` (was ${state.current_phase})` : ""}.\n\n${formatStatus(updated ?? { ...state, current_phase: params.phase })}${setSkillHint}`,
           }
         }).pipe(Effect.orDie),
     }
