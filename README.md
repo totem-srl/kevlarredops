@@ -1,43 +1,61 @@
 # PentestCode
 
-AI-powered penetration testing agent. Built on a hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT license).
+AI-powered penetration testing agent. Hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT).
 
-## What is PentestCode?
+## Install
 
-PentestCode is a terminal-based AI agent designed for penetration testing, bug bounty, CTF competitions, and security research. It uses a multi-agent architecture where a strategist-coordinator (the pentest agent) plans and dispatches specialist subagents for parallel assessment.
+**Linux / macOS:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
+```
 
-### Key Features
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.ps1 | iex
+```
 
-- **Multi-agent architecture** — 12 specialist agents (pentest orchestrator, recon, scanner, enumerator, exploiter, reporter, and more)
-- **Engagement state management** — tracks hosts, services, vulnerabilities, credentials, and attack paths
-- **Phased methodology** — Recon → Enumeration → Vulnerability Assessment → Exploitation → Post-Exploitation → Reporting
-- **7 pentest tools** — state query/update, nmap parser, scope checker, phase control, report generator, task graph
-- **19 skill files** — phase checklists, service knowledge packs, methodology playbooks
-- **20+ LLM providers** — Anthropic, OpenAI, Google, local Ollama, and more via ai-sdk
-- **Three operating modes** — auto (phased autopilot), free (on-demand), guided (step-by-step approval)
+**Options (env vars):**
+```bash
+PENTESTCODE_VERSION=1.17.15 curl -fsSL .../install.sh | bash   # pin version
+PENTESTCODE_INSTALL=/usr/local/bin curl -fsSL .../install.sh | bash  # custom dir
+```
 
-## Requirements
+The installer downloads a self-contained binary — no Bun, Node, or other runtime needed.
 
-- [Bun](https://bun.sh) runtime
-- An LLM API key (Anthropic, OpenAI, or any supported provider)
+**From source:**
+```bash
+bun install
+bun run build --single    # compiles for current platform
+# binary at packages/opencode/dist/pentestcode-<os>-<arch>/bin/pentestcode
+```
 
 ## Quick Start
 
 ```bash
-# Install dependencies
-bun install
-
-# Run in dev mode
-bun run dev
+pentestcode                           # launch TUI
+pentestcode -p "scan 10.10.10.0/24"   # one-shot prompt
+pentestcode -s <session-id>           # resume session
 ```
 
-On first launch, configure your LLM provider in `.pentestcode/pentestcode.jsonc`.
+On first launch, configure your LLM provider — Anthropic, OpenAI, Google, local Ollama, or any of 20+ providers via ai-sdk.
+
+## What It Does
+
+Multi-agent AI pentester with a strategist-coordinator architecture (based on HPTSA research, 4.3x improvement over single-agent):
+
+- **Pentest agent** — engagement lead. Plans, dispatches subagents, tracks progress via OODA loop.
+- **12 specialist subagents** — scanner, enumerator, exploiter, identity (AD/Kerberos), infrastructure, webapp, post-exploit, exploit-dev, critic, reporter, recon.
+- **Engagement state** — tracks hosts, services, vulns, credentials, access, attack paths, AD domain model.
+- **11 pentest tools** — state query/update, nmap/nuclei/crackmapexec/gobuster/bloodhound parsers, credential spray planner, scope checker, phase control, report generator.
+- **19 skill files** — phase checklists, service knowledge packs (SMB, SSH, databases, DNS, Docker, FTP, mail), methodology playbooks.
+- **Phased methodology** — Recon → Enumeration → Vuln Assessment → Exploitation → Post-Exploitation → Reporting.
+- **Three modes** — auto (phased autopilot), free (on-demand), guided (step-by-step approval).
 
 ## Slash Commands
 
 | Command | Description |
 |---------|-------------|
-| `/status` | Engagement dashboard (hosts, vulns, creds) |
+| `/status` | Engagement dashboard — hosts, vulns, creds, objectives |
 | `/targets` | Target table with services |
 | `/vulns` | Vulnerability table by severity |
 | `/creds` | Discovered credentials |
@@ -46,17 +64,6 @@ On first launch, configure your LLM provider in `.pentestcode/pentestcode.jsonc`
 | `/mode` | Switch auto/free/guided mode |
 | `/report` | Generate assessment report |
 
-## Architecture
-
-PentestCode uses a strategist-operator split (based on HPTSA research showing 4.3x improvement):
-
-- **Pentest agent** (default) — Engagement Lead. Plans tasks, dispatches subagents, tracks progress via OODA loop.
-- **Specialist subagents** — Scanner, Enumerator, Exploiter, Identity, Infrastructure, WebApp, Post-Exploit, Critic, Reporter — each with focused prompts and tool access.
-- **Engagement state** — Global JSON store at `~/.pentestcode/engagements/` with hosts, services, vulns, credentials, attack paths.
-- **Task graph** — DAG-based task planning with dependencies and difficulty scoring.
-
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-Hard fork of [OpenCode](https://github.com/anomalyco/opencode) by anomalyco (MIT license).

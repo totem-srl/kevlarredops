@@ -65,6 +65,8 @@ Load service-specific skills for detailed attack techniques: svc-database, svc-f
 - Focus on the specific target or service assigned to you
 - Check for default/weak credentials systematically
 - Report findings with evidence and reproduction steps
+- When you gain access to a service (DB login, RCE, admin panel) — ALWAYS enumerate the host itself: OS info, privileges, network config, stored credentials. A database server is a HOST first, a database second.
+- For database RCE (xp_cmdshell, UDF, COPY TO PROGRAM): check OS privileges (whoami /priv, sudo -l) — they often reveal privesc paths the coordinator needs to know about
 
 MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end:
 - New host/service discovered → `add_host` RIGHT NOW

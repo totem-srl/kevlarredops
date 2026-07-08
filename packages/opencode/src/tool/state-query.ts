@@ -18,9 +18,10 @@ export const Parameters = Schema.Struct({
     "full",
     "engagements",
     "objectives",
+    "domain",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -272,6 +273,36 @@ export const StateQueryTool = Tool.define(
                 metadata: { count: filtered.length, total: objectives.length, completed },
                 output: `${label} (${completed}/${objectives.length} completed):\n\n${lines.join("\n\n")}`,
               }
+            }
+
+            case "domain": {
+              if (!state.domain) {
+                return { title: "Domain", metadata: {}, output: "No domain info recorded. Use state_update set_domain to add Active Directory information." }
+              }
+              const dom = state.domain
+              const lines = [
+                `Domain: ${dom.domain_name}`,
+                ...(dom.forest ? [`Forest: ${dom.forest}`] : []),
+                ...(dom.domain_sid ? [`SID: ${dom.domain_sid}`] : []),
+                ...(dom.domain_controllers?.length ? [`Domain Controllers: ${dom.domain_controllers.join(", ")}`] : []),
+                ...(dom.domain_admins?.length ? [`Domain Admins: ${dom.domain_admins.join(", ")}`] : []),
+                ...(dom.gpo_names?.length ? [`GPOs: ${dom.gpo_names.join(", ")}`] : []),
+              ]
+              if (dom.trusts?.length) {
+                lines.push("Trusts:")
+                for (const t of dom.trusts) {
+                  lines.push(`  ${t.target_domain}${t.trust_type ? ` (${t.trust_type})` : ""}${t.trust_direction ? ` dir:${t.trust_direction}` : ""}${t.is_transitive ? " transitive" : ""}`)
+                }
+              }
+              if (dom.password_policy) {
+                const pp = dom.password_policy
+                const parts: string[] = []
+                if (pp.min_length !== undefined) parts.push(`min_length:${pp.min_length}`)
+                if (pp.lockout_threshold !== undefined) parts.push(`lockout:${pp.lockout_threshold}`)
+                if (pp.complexity_enabled !== undefined) parts.push(`complexity:${pp.complexity_enabled}`)
+                if (parts.length > 0) lines.push(`Password Policy: ${parts.join(", ")}`)
+              }
+              return { title: "Domain", metadata: { domain: dom.domain_name }, output: lines.join("\n") }
             }
 
             case "full": {

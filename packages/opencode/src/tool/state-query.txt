@@ -11,4 +11,6 @@ Supported query types:
 - tasks: Show pending/in-progress task tree nodes
 - host: Show details for a specific host (set filter to the IP address)
 - full: Return full compact engagement context
+- objectives: List engagement objectives with status and priority
+- domain: Show Active Directory domain info (domain name, DCs, admins, trusts, password policy)
 - engagements: List all saved engagements and which is currently loaded

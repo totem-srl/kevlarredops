@@ -9,8 +9,12 @@ import * as Tool from "./tool"
 export const Parameters = Schema.Struct({
   action: Schema.Literals([
     "add_host",
+    "delete_host",
     "add_vuln",
+    "update_vuln",
+    "delete_vuln",
     "add_credential",
+    "delete_credential",
     "add_access",
     "set_phase",
     "set_mode",
@@ -21,6 +25,8 @@ export const Parameters = Schema.Struct({
     "create_engagement",
     "load_engagement",
     "reload_engagement",
+    "set_domain",
+    "update_domain",
     "add_objective",
     "update_objective",
     "complete_objective",
@@ -136,6 +142,26 @@ export const StateUpdateTool = Tool.define(
               }
             }
 
+            case "delete_host": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const ip = d.ip as string
+              if (!ip) {
+                return { title: "Error", metadata: {}, output: "Error: data.ip is required for delete_host." }
+              }
+              const deleted = yield* store.deleteHost(ip)
+              if (!deleted) {
+                return { title: "Error", metadata: {}, output: `Host ${ip} not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Deleted ${ip}`,
+                metadata: { ip },
+                output: `Host ${ip} deleted.${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
             case "add_vuln": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
@@ -176,6 +202,55 @@ export const StateUpdateTool = Tool.define(
               }
             }
 
+            case "update_vuln": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const hostIp = d.host_ip as string
+              const vulnId = d.vuln_id as string
+              if (!hostIp || !vulnId) {
+                return { title: "Error", metadata: {}, output: "Error: data.host_ip and data.vuln_id are required for update_vuln." }
+              }
+              const patch: Record<string, unknown> = {}
+              if (d.status !== undefined) patch.status = d.status
+              if (d.severity !== undefined) patch.severity = d.severity
+              if (d.evidence !== undefined) patch.evidence = d.evidence
+              if (d.description !== undefined) patch.description = d.description
+              if (d.title !== undefined) patch.title = d.title
+              const ok = yield* store.updateVuln(hostIp, vulnId, patch as Partial<{ -readonly [K in keyof EngagementSchema.Vulnerability]: EngagementSchema.Vulnerability[K] }>)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Vuln "${vulnId}" not found on host ${hostIp}.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              const changedFields = Object.keys(patch).join(", ")
+              return {
+                title: `Vuln updated: ${vulnId}`,
+                metadata: { host_ip: hostIp, vuln_id: vulnId },
+                output: `Vulnerability "${vulnId}" on ${hostIp} updated (${changedFields}).${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "delete_vuln": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const hostIp = d.host_ip as string
+              const vulnId = d.vuln_id as string
+              if (!hostIp || !vulnId) {
+                return { title: "Error", metadata: {}, output: "Error: data.host_ip and data.vuln_id are required for delete_vuln." }
+              }
+              const deleted = yield* store.deleteVuln(hostIp, vulnId)
+              if (!deleted) {
+                return { title: "Error", metadata: {}, output: `Vuln "${vulnId}" not found on host ${hostIp}.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Vuln deleted: ${vulnId}`,
+                metadata: { host_ip: hostIp, vuln_id: vulnId },
+                output: `Vulnerability "${vulnId}" deleted from ${hostIp}.${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
             case "add_credential": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
@@ -205,6 +280,26 @@ export const StateUpdateTool = Tool.define(
                 title: `Cred: ${username}`,
                 metadata: { id, username },
                 output: `Credential added: ${username} (${d.cred_type || "password"}) id:${id}${d.source ? ` source:${d.source}` : ""}${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "delete_credential": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for delete_credential." }
+              }
+              const deleted = yield* store.deleteCredential(id)
+              if (!deleted) {
+                return { title: "Error", metadata: {}, output: `Credential "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Cred deleted: ${id}`,
+                metadata: { id },
+                output: `Credential "${id}" deleted.${updated ? `\n${countsLine(updated)}` : ""}`,
               }
             }
 
@@ -390,6 +485,54 @@ export const StateUpdateTool = Tool.define(
                 title: `Attack: ${technique}`,
                 metadata: { source, target, technique, success: step.success },
                 output: `Attack step recorded: ${source} -> ${target} via ${technique} (${step.success ? "SUCCESS" : "FAILED"}): ${result}${step.mitre_attack_id ? ` [${step.mitre_attack_id}]` : ""}\n${countsLine(updated)}`,
+              }
+            }
+
+            case "set_domain": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const domainName = d.domain_name as string
+              if (!domainName) {
+                return { title: "Error", metadata: {}, output: "Error: data.domain_name is required for set_domain." }
+              }
+              const domain: EngagementSchema.DomainState = {
+                domain_name: domainName,
+                forest: d.forest as string | undefined,
+                domain_sid: d.domain_sid as string | undefined,
+                domain_controllers: d.domain_controllers as string[] | undefined,
+                domain_admins: d.domain_admins as string[] | undefined,
+                gpo_names: d.gpo_names as string[] | undefined,
+                trusts: d.trusts as EngagementSchema.Trust[] | undefined,
+                password_policy: d.password_policy as EngagementSchema.DomainState["password_policy"],
+              }
+              yield* store.setDomain(domain)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Domain: ${domainName}`,
+                metadata: { domain: domainName },
+                output: `Domain set: ${domainName}${domain.forest ? ` forest:${domain.forest}` : ""}${domain.domain_controllers?.length ? ` DCs:${domain.domain_controllers.join(",")}` : ""}${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "update_domain": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              if (!state.domain) {
+                return { title: "Error", metadata: {}, output: "No domain set. Use set_domain first." }
+              }
+              const patch: Record<string, unknown> = {}
+              for (const key of ["domain_name", "forest", "domain_sid", "domain_controllers", "domain_admins", "gpo_names", "trusts", "password_policy"]) {
+                if (d[key] !== undefined) patch[key] = d[key]
+              }
+              yield* store.updateDomain(patch)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              const changedFields = Object.keys(patch).join(", ")
+              return {
+                title: `Domain updated`,
+                metadata: { changed: changedFields },
+                output: `Domain "${state.domain.domain_name}" updated (${changedFields}).${updated ? `\n${countsLine(updated)}` : ""}`,
               }
             }
 

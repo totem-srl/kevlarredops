@@ -69,6 +69,10 @@ export const Credential = Schema.Struct({
   value: Schema.optional(Schema.String),
   source: Schema.optional(Schema.String),
   valid_for: Schema.optional(Schema.Array(Schema.String)),
+  domain: Schema.optional(Schema.String),
+  ticket_type: Schema.optional(Schema.String),
+  service_principal: Schema.optional(Schema.String),
+  ticket_expiry: Schema.optional(Schema.String),
 }).annotate({ identifier: "Engagement.Credential" })
 export type Credential = typeof Credential.Type
 
@@ -81,10 +85,21 @@ export const Access = Schema.Struct({
 }).annotate({ identifier: "Engagement.Access" })
 export type Access = typeof Access.Type
 
+export const DomainInfo = Schema.Struct({
+  domain: Schema.optional(Schema.String),
+  is_dc: Schema.optional(Schema.Boolean),
+  computer_account: Schema.optional(Schema.String),
+  forest: Schema.optional(Schema.String),
+  site: Schema.optional(Schema.String),
+  functional_level: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.DomainInfo" })
+export type DomainInfo = typeof DomainInfo.Type
+
 export const Host = Schema.Struct({
   ip: Schema.String,
   hostname: Schema.optional(Schema.String),
   os: Schema.optional(Schema.String),
+  domain_info: Schema.optional(DomainInfo),
   services: Schema.Array(Service),
   vulns: Schema.Array(Vulnerability),
   access: Schema.Array(Access),
@@ -137,6 +152,31 @@ export const TaskTreeNode = Schema.Struct({
 }).annotate({ identifier: "Engagement.TaskTreeNode" })
 export type TaskTreeNode = typeof TaskTreeNode.Type
 
+export const Trust = Schema.Struct({
+  target_domain: Schema.String,
+  trust_type: Schema.optional(Schema.String),
+  trust_direction: Schema.optional(Schema.String),
+  is_transitive: Schema.optional(Schema.Boolean),
+}).annotate({ identifier: "Engagement.Trust" })
+export type Trust = typeof Trust.Type
+
+export const DomainState = Schema.Struct({
+  domain_name: Schema.String,
+  forest: Schema.optional(Schema.String),
+  domain_sid: Schema.optional(Schema.String),
+  trusts: Schema.optional(Schema.Array(Trust)),
+  domain_controllers: Schema.optional(Schema.Array(Schema.String)),
+  domain_admins: Schema.optional(Schema.Array(Schema.String)),
+  gpo_names: Schema.optional(Schema.Array(Schema.String)),
+  password_policy: Schema.optional(Schema.Struct({
+    min_length: Schema.optional(Schema.Number),
+    lockout_threshold: Schema.optional(Schema.Number),
+    lockout_duration: Schema.optional(Schema.String),
+    complexity_enabled: Schema.optional(Schema.Boolean),
+  })),
+}).annotate({ identifier: "Engagement.DomainState" })
+export type DomainState = typeof DomainState.Type
+
 export const State = Schema.Struct({
   id: ID,
   name: Schema.String,
@@ -150,6 +190,7 @@ export const State = Schema.Struct({
   task_tree: Schema.Array(TaskTreeNode),
   task_graph: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   objectives: Schema.optional(Schema.Record(Schema.String, Objective)),
+  domain: Schema.optional(DomainState),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -218,6 +259,15 @@ export function toCompactContext(state: State, maxHosts = 20): string {
         level: a.level,
       }))
     ;(data.hosts as Record<string, unknown>)[ip] = h
+  }
+
+  if (state.domain) {
+    const dom: Record<string, unknown> = { name: state.domain.domain_name }
+    if (state.domain.forest) dom.forest = state.domain.forest
+    if (state.domain.domain_controllers?.length) dom.dcs = state.domain.domain_controllers
+    if (state.domain.domain_admins?.length) dom.admins = state.domain.domain_admins
+    if (state.domain.trusts?.length) dom.trusts = state.domain.trusts.map((t) => t.target_domain)
+    data.domain = dom
   }
 
   if (state.flags.length > 0) data.flags = state.flags

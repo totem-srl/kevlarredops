@@ -7,16 +7,26 @@ Actions and their required data fields:
 - create_engagement: { name: string }
 - load_engagement: { name: string }
 - reload_engagement: {} (reloads current engagement from disk)
-- add_host: { ip: string, hostname?: string, os?: string, services?: Array<{ port: number, protocol?: string, service?: string, version?: string, state?: string, banner?: string }> }
-- add_vuln: { host_ip: string, title: string, severity?: "critical"|"high"|"medium"|"low"|"info", status?: "suspected"|"confirmed"|"exploited"|"false_positive", description?: string, evidence?: string, service_port?: number, references?: string[], mitre_attack_id?: string }
-- add_credential: { id: string, cred_type?: string, username: string, value: string, source?: string, valid_for?: string[] }
-- add_access: { host_ip: string, access_type: string, username: string, level?: "none"|"user"|"root"|"system", credential_id?: string, details?: string }
+- add_host: { ip: string, hostname?: string, os?: string, services?: Array<{ port: number, protocol?: string, service?: string, version?: string, state?: string, banner?: string }> } — services are merged by port (not overwritten) on re-scan
+- delete_host: { ip: string }
+- add_vuln: { host_ip: string, title: string, severity?: "critical"|"high"|"medium"|"low"|"info", status?: "suspected"|"confirmed"|"exploited"|"false_positive", description?: string, evidence?: string, service_port?: number, references?: string[], mitre_attack_id?: string } — deduplicates by (title, service_port): re-adding updates the existing entry
+- update_vuln: { host_ip: string, vuln_id: string, status?: "suspected"|"confirmed"|"exploited"|"false_positive", severity?: string, evidence?: string, description?: string, title?: string }
+- delete_vuln: { host_ip: string, vuln_id: string }
+- add_credential: { id: string, cred_type?: string, username: string, value: string, source?: string, valid_for?: string[] } — re-adding same id updates the existing entry
+- delete_credential: { id: string }
+- add_access: { host_ip: string, access_type: string, username: string, level?: "none"|"user"|"root"|"system", credential_id?: string, details?: string } — deduplicates by (access_type, username): re-adding updates the existing entry
 - set_phase: { phase: "recon"|"enumeration"|"vuln_assess"|"exploitation"|"post_exploit"|"reporting" }
 - set_mode: { mode: "auto"|"free"|"guided" }
 - update_scope: { targets?: string[], excludes?: string[], notes?: string }
 - add_flag: { flag: string }
 - add_note: { note: string }
 - add_attack_step: { source: string, target: string, technique: string, result: string, success?: boolean, mitre_attack_id?: string }
+- set_domain: { domain_name: string, forest?: string, domain_sid?: string, domain_controllers?: string[], domain_admins?: string[], gpo_names?: string[], trusts?: Array<{ target_domain: string, trust_type?: string, trust_direction?: string, is_transitive?: boolean }>, password_policy?: { min_length?: number, lockout_threshold?: number, lockout_duration?: string, complexity_enabled?: boolean } }
+- update_domain: { ...any fields from set_domain to patch (domain must already exist) }
 - add_objective: { id: string, title: string, description?: string, status?: "not_started"|"in_progress"|"completed"|"blocked"|"abandoned", priority?: "critical"|"high"|"medium"|"low", category?: "ctf"|"pentest"|"bounty"|"red_team"|"custom", target_hosts?: string[], linked_vulns?: string[], linked_creds?: string[], flags?: string[], evidence?: string, notes?: string }
 - update_objective: { id: string, ...any fields from add_objective to patch }
 - complete_objective: { id: string, evidence?: string }
+
+Notes:
+- add_host supports domain_info: { domain?: string, is_dc?: boolean, computer_account?: string, forest?: string }
+- add_credential supports AD fields: domain?: string, ticket_type?: string ("TGT"|"TGS"|"ST"), service_principal?: string, ticket_expiry?: string

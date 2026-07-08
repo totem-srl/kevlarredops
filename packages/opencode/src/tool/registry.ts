@@ -28,10 +28,15 @@ import { WebSearchTool } from "./websearch"
 import { StateQueryTool } from "./state-query"
 import { StateUpdateTool } from "./state-update"
 import { NmapParseTool } from "./nmap-parse"
+import { NucleiParseTool } from "./nuclei-parse"
+import { GobusterParseTool } from "./gobuster-parse"
+import { CmeParseTool } from "./cme-parse"
+import { BloodHoundParseTool } from "./bloodhound-parse"
 import { ScopeCheckTool } from "./scope-check"
 import { PhaseControlTool } from "./phase-control"
 import { ReportGenTool } from "./report-gen"
 import { TaskGraphTool } from "./task-graph"
+import { CredSprayTool } from "./cred-spray"
 import { EngagementStore } from "@opencode-ai/core/engagement/store"
 import * as Truncate from "./truncate"
 import { Glob } from "@opencode-ai/core/util/glob"
@@ -114,10 +119,15 @@ const layer = Layer.effect(
     const statequery = yield* StateQueryTool
     const stateupdate = yield* StateUpdateTool
     const nmapparse = yield* NmapParseTool
+    const nucleiparse = yield* NucleiParseTool
     const scopecheck = yield* ScopeCheckTool
     const phasecontrol = yield* PhaseControlTool
     const reportgen = yield* ReportGenTool
     const taskgraph = yield* TaskGraphTool
+    const credspray = yield* CredSprayTool
+    const gobusterparse = yield* GobusterParseTool
+    const cmeparse = yield* CmeParseTool
+    const bloodhoundparse = yield* BloodHoundParseTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -225,10 +235,15 @@ const layer = Layer.effect(
           statequery: Tool.init(statequery),
           stateupdate: Tool.init(stateupdate),
           nmapparse: Tool.init(nmapparse),
+          nucleiparse: Tool.init(nucleiparse),
           scopecheck: Tool.init(scopecheck),
           phasecontrol: Tool.init(phasecontrol),
           reportgen: Tool.init(reportgen),
           taskgraph: Tool.init(taskgraph),
+          credspray: Tool.init(credspray),
+          gobusterparse: Tool.init(gobusterparse),
+          cmeparse: Tool.init(cmeparse),
+          bloodhoundparse: Tool.init(bloodhoundparse),
         })
 
         return {
@@ -249,10 +264,15 @@ const layer = Layer.effect(
             tool.statequery,
             tool.stateupdate,
             tool.nmapparse,
+            tool.nucleiparse,
             tool.scopecheck,
             tool.phasecontrol,
             tool.reportgen,
             tool.taskgraph,
+            tool.credspray,
+            tool.gobusterparse,
+            tool.cmeparse,
+            tool.bloodhoundparse,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,
