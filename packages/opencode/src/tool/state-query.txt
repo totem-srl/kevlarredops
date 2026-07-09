@@ -14,3 +14,6 @@ Supported query types:
 - objectives: List engagement objectives with status and priority
 - domain: Show Active Directory domain info (domain name, DCs, admins, trusts, password policy)
 - engagements: List all saved engagements and which is currently loaded
+- changelog: Show recent state changes (filter = number of entries to show, default 50)
+- diff: Show changes since last prompt injection — what happened since the LLM last saw the state
+- relationships: Show entity relationships/edges (filter by rel_type, source_id, or target_id)

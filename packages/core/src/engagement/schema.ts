@@ -190,6 +190,33 @@ export const DomainState = Schema.Struct({
 }).annotate({ identifier: "Engagement.DomainState" })
 export type DomainState = typeof DomainState.Type
 
+export const RelationType = Schema.Literals([
+  "EXPLOITED_VIA",
+  "CREDENTIAL_FROM",
+  "REACHABLE_FROM",
+  "TRUSTS",
+  "MEMBER_OF",
+  "ADMIN_OF",
+  "PIVOT_TO",
+  "AUTHENTICATES_TO",
+  "LATERAL_MOVE",
+  "CONTROLS",
+])
+export type RelationType = typeof RelationType.Type
+
+export const EntityType = Schema.Literals(["host", "credential", "vuln", "service", "domain", "user", "group"])
+export type EntityType = typeof EntityType.Type
+
+export const Relationship = Schema.Struct({
+  source_type: EntityType,
+  source_id: Schema.String,
+  rel_type: RelationType,
+  target_type: EntityType,
+  target_id: Schema.String,
+  metadata: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Relationship" })
+export type Relationship = typeof Relationship.Type
+
 export const State = Schema.Struct({
   id: ID,
   name: Schema.String,
@@ -204,6 +231,7 @@ export const State = Schema.Struct({
   task_graph: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
   objectives: Schema.optional(Schema.Record(Schema.String, Objective)),
   domain: Schema.optional(DomainState),
+  relationships: Schema.optional(Schema.Array(Relationship)),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -220,6 +248,48 @@ export const ChangelogEntry = Schema.Struct({
 export type ChangelogEntry = typeof ChangelogEntry.Type
 
 export const CHANGELOG_MAX_ENTRIES = 500
+
+export function toDiffContext(entries: ChangelogEntry[], maxEntries = 20): string | undefined {
+  if (entries.length === 0) return undefined
+  const recent = entries.slice(-maxEntries)
+  const lines: string[] = ["Changes since last turn:"]
+  for (const e of recent) {
+    const ts = e.timestamp.split("T")[1]?.slice(0, 8) ?? e.timestamp
+    lines.push(`  [${ts}] ${e.action} ${e.entity_type}${e.entity_id ? ` (${e.entity_id})` : ""}: ${e.summary}`)
+  }
+  if (entries.length > maxEntries) {
+    lines.push(`  ... and ${entries.length - maxEntries} earlier changes`)
+  }
+  return lines.join("\n")
+}
+
+export function unvalidatedVulns(state: State): Array<{ ip: string; vuln: Vulnerability }> {
+  const result: Array<{ ip: string; vuln: Vulnerability }> = []
+  for (const [ip, host] of Object.entries(state.hosts)) {
+    for (const vuln of host.vulns) {
+      if (vuln.status === "suspected" || (!vuln.status && (vuln.confidence === undefined || vuln.confidence < 0.8))) {
+        result.push({ ip, vuln })
+      }
+    }
+  }
+  return result
+}
+
+export function criticHint(state: State): string | undefined {
+  const unvalidated = unvalidatedVulns(state)
+  if (unvalidated.length === 0) return undefined
+  const byHost = new Map<string, string[]>()
+  for (const { ip, vuln } of unvalidated) {
+    const list = byHost.get(ip) ?? []
+    list.push(`${vuln.title} [${(vuln.severity ?? "medium").toUpperCase()}]`)
+    byHost.set(ip, list)
+  }
+  const lines = [`${unvalidated.length} unvalidated finding(s) — spawn "critic" subagent to validate:`]
+  for (const [ip, vulns] of byHost) {
+    lines.push(`  ${ip}: ${vulns.join(", ")}`)
+  }
+  return lines.join("\n")
+}
 
 export function summary(state: State) {
   const hostCount = Object.keys(state.hosts).length
@@ -317,6 +387,10 @@ export function toCompactContext(state: State, maxHosts = 20): string {
       const completed = objs.filter((o) => o.status === "completed").length
       data.objectives_progress = `${completed}/${objs.length} completed`
     }
+  }
+
+  if (state.relationships && state.relationships.length > 0) {
+    data.relationships = state.relationships.map((r) => `${r.source_type}:${r.source_id}-[${r.rel_type}]->${r.target_type}:${r.target_id}`)
   }
 
   return JSON.stringify(data, undefined, 2)

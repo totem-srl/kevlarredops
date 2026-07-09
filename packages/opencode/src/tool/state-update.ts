@@ -30,6 +30,8 @@ export const Parameters = Schema.Struct({
     "add_objective",
     "update_objective",
     "complete_objective",
+    "add_relationship",
+    "delete_relationship",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -660,6 +662,72 @@ export const StateUpdateTool = Tool.define(
                 title: `Objective completed: ${obj.title}`,
                 metadata: { id, completed: completedCount, total: totalCount },
                 output: `Objective "${obj.title}" [${id}] COMPLETED.${evidence ? ` Evidence: ${evidence}` : ""}\nProgress: ${completedCount}/${totalCount} objectives.${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "add_relationship": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const sourceType = d.source_type as string
+              const sourceId = d.source_id as string
+              const relType = d.rel_type as string
+              const targetType = d.target_type as string
+              const targetId = d.target_id as string
+              if (!sourceType || !sourceId || !relType || !targetType || !targetId) {
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output: "Error: data.source_type, data.source_id, data.rel_type, data.target_type, and data.target_id are required for add_relationship.",
+                }
+              }
+              const rel = {
+                source_type: sourceType,
+                source_id: sourceId,
+                rel_type: relType,
+                target_type: targetType,
+                target_id: targetId,
+                metadata: d.metadata as string | undefined,
+              } as EngagementSchema.Relationship
+              const added = yield* store.addRelationship(rel)
+              if (!added) {
+                return {
+                  title: "Relationship exists",
+                  metadata: {},
+                  output: `Relationship already exists: ${sourceType}:${sourceId} --[${relType}]--> ${targetType}:${targetId}`,
+                }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Rel: ${relType}`,
+                metadata: { source: sourceId, target: targetId, rel_type: relType },
+                output: `Relationship added: ${sourceType}:${sourceId} --[${relType}]--> ${targetType}:${targetId}${d.metadata ? ` (${d.metadata})` : ""}${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            case "delete_relationship": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const sourceId = d.source_id as string
+              const relType = d.rel_type as string
+              const targetId = d.target_id as string
+              if (!sourceId || !relType || !targetId) {
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output: "Error: data.source_id, data.rel_type, and data.target_id are required for delete_relationship.",
+                }
+              }
+              const deleted = yield* store.deleteRelationship(sourceId, relType, targetId)
+              if (!deleted) {
+                return { title: "Error", metadata: {}, output: `Relationship not found: ${sourceId} --[${relType}]--> ${targetId}` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Rel deleted`,
+                metadata: { source: sourceId, target: targetId },
+                output: `Relationship deleted: ${sourceId} --[${relType}]--> ${targetId}${updated ? `\n${countsLine(updated)}` : ""}`,
               }
             }
 

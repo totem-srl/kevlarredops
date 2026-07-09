@@ -355,6 +355,22 @@ export const NmapParseTool = Tool.define(
               }
             }
 
+            // Auto-create REACHABLE_FROM relationships between co-discovered hosts
+            if (hosts.length > 1) {
+              const ips = hosts.map((h) => h.ip)
+              for (let i = 0; i < ips.length; i++) {
+                for (let j = i + 1; j < ips.length; j++) {
+                  yield* store.addRelationship({
+                    source_type: "host",
+                    source_id: ips[i]!,
+                    rel_type: "REACHABLE_FROM",
+                    target_type: "host",
+                    target_id: ips[j]!,
+                  })
+                }
+              }
+            }
+
             // Persist to disk
             const updatedState = yield* store.get()
             if (updatedState) yield* store.save(updatedState)
@@ -364,6 +380,10 @@ export const NmapParseTool = Tool.define(
           let output = formatOutput(hosts, shouldUpdate, totalServices)
           if (recommended.length > 0) {
             output += `\n\nRelevant service skills available: ${recommended.map((s) => `"${s}"`).join(", ")}. Load via the skill tool for service-specific attack techniques.`
+          }
+
+          if (shouldUpdate && hosts.length > 0) {
+            output += `\n\n[Auto-critic] New hosts discovered. After enumeration, spawn "critic" subagent to validate any findings.`
           }
 
           return {

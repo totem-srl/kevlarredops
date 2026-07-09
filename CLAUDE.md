@@ -211,10 +211,39 @@ bun turbo typecheck
 - [x] Task graph tool for PTT (Pentesting Task Tree)
 - [x] Objectives system (add/update/complete objectives)
 
+## What Was Done (Architecture Roadmap — Waves 1-2)
+
+### Wave 1: Foundation
+- [x] **Confidence Scoring** — `confidence: number` (0.0-1.0) on Vuln, Credential, Access. Parsers set base values (0.9-0.95). Displayed in state_query output and compact context.
+- [x] **Structured Evidence** — `evidence_items: Array<{tool, command, output, timestamp, confidence}>` on Vuln. Parsers populate with tool name and output. Summary in `evidence` string field, full data in `evidence_items`.
+- [x] **Changelog** — separate `changelog.json`, every store mutation logged via `logChange()`. `state_query changelog` retrieves entries. Retention capped at 500 entries (`CHANGELOG_MAX_ENTRIES`). Loaded/saved alongside engagement state.
+
+### Wave 2: Intelligence
+- [x] **State Diff Injection** (#4) — `toDiffContext()` in schema.ts computes delta from changelog entries. `prompt.ts` tracks last injection timestamp via `markInjected()`/`getLastInjectedTimestamp()`. Each LLM turn sees "Changes since last turn:" before the full state dump, showing what's new. `state_query diff` also available.
+- [x] **Auto-Critic** (#5) — `criticHint()` in schema.ts detects unvalidated vulns (status=suspected, confidence<0.8). Injected into prompt as `<auto-critic>` section with vuln list and instructions to spawn critic subagent. Parser outputs (nmap, nuclei, cme) include `[Auto-critic]` hints suggesting critic validation. Critic agent stays READ-ONLY, returns verdict → coordinator updates state.
+- [x] **Entity Relationships** (#6) — `Relationship` schema with typed edges: EXPLOITED_VIA, CREDENTIAL_FROM, REACHABLE_FROM, TRUSTS, MEMBER_OF, ADMIN_OF, PIVOT_TO, AUTHENTICATES_TO, LATERAL_MOVE, CONTROLS. `relationships[]` on State. Store methods: `addRelationship()` (dedup by source+type+target), `getRelationships()` (filter by entity_id or rel_type), `deleteRelationship()`. Tools: `state_update add_relationship/delete_relationship`, `state_query relationships`. Auto-created by parsers: nmap→REACHABLE_FROM, cme→AUTHENTICATES_TO/ADMIN_OF, bloodhound→MEMBER_OF/ADMIN_OF/TRUSTS. Displayed in compact context.
+- [x] **Phase Quality Gates** (#7) — `evaluateQualityGate()` in phase-control.ts checks coverage metrics per phase before transition. Missing items block transition; warnings allow with notice. `force:true` parameter skips all gates. Gates: recon (hosts+services), enumeration (version coverage), vuln_assess (confirmed vulns, unvalidated check), exploitation (compromised hosts), post_exploit (creds, lateral coverage, objectives).
+
+### Storage Layout (updated)
+```
+~/.pentestcode/engagements/<name>/
+├── state.json          # core (compact) — now includes relationships[]
+├── changelog.json      # deletable, retention 500
+├── decisions.json      # Wave 3 — deletable, retention 100
+└── evidence/           # Wave 3 — deletable folder, files per vuln_id
+```
+
 ## What Remains (TODO)
 
+### Wave 3: Strategy (next)
+- [ ] **Decision Memory** (#8) — decisions.json, strategic decisions only, retention 100. `add_decision`/`update_decision_outcome`. ~2 days.
+- [ ] **Alert Queue** (#9) — `alerts[]` in state for urgent inter-agent findings. TTL 1hr, max 50 active. Auto-alert on critical findings. ~1-2 days.
+- [ ] **OODA Structured Reasoning** (#10) — auto-generated situation section in prompt (changes, coverage, failures, ready tasks, alerts). ~2-3 days.
+- [ ] **Attack Path Derivation** (#11) — tool for computing possible paths to objectives from state + relationships. BFS/DFS + scoring. ~3-5 days.
+- [ ] **Parallel Subagent Improvements** (#12) — better dispatch via task_graph, agent context carry on re-spawn. ~2-3 days.
+
 ### Agent Quality (from real Standoff365 testing)
-- [ ] Scope guard on bash tool — warn/block out-of-scope targets before execution
+- [x] ~~Scope guard on bash tool~~ — CANCELLED per Zhangir's decision
 - [ ] Tool knowledge in prompts — agent misuses tool flags (e.g. `--dpapi cookies` instead of bare `--dpapi`). Add more tool-specific knowledge to skills and prompts as issues surface during testing.
 - [ ] Inter-agent communication — subagents run in isolation, can't signal coordinator mid-run. Need pub/sub or priority message passing for urgent findings (e.g. scanner finds DC → coordinator should know immediately).
 - [ ] Session/shell tracking — no model for alive shells, active listeners, established tunnels. Agent loses track of what's reachable.

@@ -20,9 +20,11 @@ export const Parameters = Schema.Struct({
     "objectives",
     "domain",
     "changelog",
+    "diff",
+    "relationships",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff (recent changes), relationships (entity edges)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -319,6 +321,46 @@ export const StateQueryTool = Tool.define(
                 title: "Changelog",
                 metadata: { count: entries.length },
                 output: `Changelog (last ${entries.length}):\n${lines.join("\n")}`,
+              }
+            }
+
+            case "diff": {
+              const lastTs = yield* store.getLastInjectedTimestamp()
+              if (!lastTs) {
+                return { title: "Diff", metadata: { count: 0 }, output: "No previous injection point. All changes are new." }
+              }
+              const entries = yield* store.getChangelogSince(lastTs)
+              if (entries.length === 0) {
+                return { title: "Diff", metadata: { count: 0, since: lastTs }, output: `No changes since last prompt injection (${lastTs}).` }
+              }
+              const diff = EngagementSchema.toDiffContext(entries)
+              return {
+                title: "Diff",
+                metadata: { count: entries.length, since: lastTs },
+                output: diff ?? "No changes.",
+              }
+            }
+
+            case "relationships": {
+              const rels = state.relationships ?? []
+              if (rels.length === 0) {
+                return { title: "Relationships", metadata: { count: 0 }, output: "No entity relationships recorded yet." }
+              }
+              let filtered = rels
+              if (params.filter) {
+                const f = params.filter.toUpperCase()
+                filtered = rels.filter((r) =>
+                  r.rel_type === f || r.source_id === params.filter || r.target_id === params.filter,
+                )
+              }
+              const lines = filtered.map((r) =>
+                `  ${r.source_type}:${r.source_id} --[${r.rel_type}]--> ${r.target_type}:${r.target_id}${r.metadata ? ` (${r.metadata})` : ""}`,
+              )
+              const label = params.filter ? `Relationships [${params.filter}]` : "Relationships"
+              return {
+                title: label,
+                metadata: { count: filtered.length, total: rels.length },
+                output: `${label} (${filtered.length}):\n${lines.join("\n")}`,
               }
             }
 

@@ -335,6 +335,25 @@ export const CmeParseTool = Tool.define(
                   level,
                   accessType: c.protocol.toLowerCase(),
                 })
+
+                // Auto-create relationships
+                yield* store.addRelationship({
+                  source_type: "credential",
+                  source_id: id,
+                  rel_type: "AUTHENTICATES_TO",
+                  target_type: "host",
+                  target_id: c.ip,
+                  metadata: `${c.protocol} port:${c.port}`,
+                })
+                if (c.isAdmin) {
+                  yield* store.addRelationship({
+                    source_type: "credential",
+                    source_id: id,
+                    rel_type: "ADMIN_OF",
+                    target_type: "host",
+                    target_id: c.ip,
+                  })
+                }
               }
             }
 
@@ -342,7 +361,14 @@ export const CmeParseTool = Tool.define(
             if (updatedState) yield* store.save(updatedState)
           }
 
-          const output = formatOutput(contentLines.length, credentials, hosts, failures, shouldUpdate)
+          let output = formatOutput(contentLines.length, credentials, hosts, failures, shouldUpdate)
+
+          if (shouldUpdate) {
+            const adminCreds = credentials.filter((c) => c.isAdmin)
+            if (adminCreds.length > 0) {
+              output += `\n\n[Auto-critic] ${adminCreds.length} admin access(es) found — consider spawning "critic" subagent to validate Pwn3d claims and evidence quality.`
+            }
+          }
 
           return {
             title: `cme: ${credentials.length} creds, ${credentials.filter((c) => c.isAdmin).length} admin`,

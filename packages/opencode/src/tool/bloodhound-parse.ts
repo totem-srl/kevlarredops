@@ -695,6 +695,35 @@ export const BloodHoundParseTool = Tool.define(
                   `Identified ${domainAdmins.length} domain admin account(s) from privileged groups`,
                 )
               }
+
+              // Auto-create MEMBER_OF relationships
+              for (const g of groups) {
+                for (const m of g.members) {
+                  yield* store.addRelationship({
+                    source_type: m.ObjectType === "User" ? "user" : m.ObjectType === "Group" ? "group" : "host",
+                    source_id: m.ObjectIdentifier,
+                    rel_type: "MEMBER_OF",
+                    target_type: "group",
+                    target_id: g.objectid,
+                    metadata: g.name,
+                  })
+                }
+                // DA/EA groups → ADMIN_OF relationships
+                if (g.admincount) {
+                  for (const m of g.members) {
+                    if (m.ObjectType === "User") {
+                      yield* store.addRelationship({
+                        source_type: "user",
+                        source_id: m.ObjectIdentifier,
+                        rel_type: "ADMIN_OF",
+                        target_type: "domain",
+                        target_id: g.name.split("@").pop() ?? g.name,
+                        metadata: `via ${g.name}`,
+                      })
+                    }
+                  }
+                }
+              }
             }
 
             summaries.push({
@@ -749,6 +778,18 @@ export const BloodHoundParseTool = Tool.define(
                   trusts,
                 })
                 stateUpdates.push(`Set domain: ${domainName} with ${trusts.length} trust(s)`)
+
+                // Auto-create TRUSTS relationships
+                for (const t of d.trusts) {
+                  yield* store.addRelationship({
+                    source_type: "domain",
+                    source_id: domainName,
+                    rel_type: "TRUSTS",
+                    target_type: "domain",
+                    target_id: t.TargetDomainName,
+                    metadata: `${trustDirectionLabel(t.TrustDirection)} ${trustTypeLabel(t.TrustType)}`,
+                  })
+                }
 
                 // Add bidirectional trusts as vulns
                 const state = yield* store.get()

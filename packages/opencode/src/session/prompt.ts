@@ -1317,6 +1317,17 @@ const layer = Layer.effect(
                   ]
                   if (modeDirective) lines.push("", modeDirective)
                   if (transitionHint) lines.push("", transitionHint)
+
+                  const lastTs = yield* engagement.getLastInjectedTimestamp()
+                  if (lastTs) {
+                    const recentChanges = yield* engagement.getChangelogSince(lastTs)
+                    const diff = EngagementSchema.toDiffContext(recentChanges)
+                    if (diff) {
+                      lines.push("", diff)
+                    }
+                  }
+                  yield* engagement.markInjected()
+
                   lines.push(
                     "",
                     "Current engagement state:",
@@ -1341,6 +1352,17 @@ const layer = Layer.effect(
                     }
                     lines.push("</task-graph>")
                   }
+                  const criticReminder = EngagementSchema.criticHint(state)
+                  if (criticReminder) {
+                    lines.push("")
+                    lines.push("<auto-critic>")
+                    lines.push(criticReminder)
+                    lines.push("Use the task tool to spawn a critic subagent: agent_type=critic, provide the vuln IDs and host IPs to validate.")
+                    lines.push("Critic is READ-ONLY. It will return a verdict (CONFIRMED/FALSE_POSITIVE/NEEDS_MORE_EVIDENCE/DOWNGRADE/UPGRADE).")
+                    lines.push("After receiving the critic's verdict, update vuln status and confidence with state_update update_vuln.")
+                    lines.push("</auto-critic>")
+                  }
+
                   lines.push("")
                   lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Do not batch.")
                   lines.push("</pentest-engagement>")

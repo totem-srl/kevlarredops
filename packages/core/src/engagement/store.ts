@@ -54,6 +54,12 @@ export interface Interface {
   readonly updateObjective: (id: string, patch: Record<string, unknown>) => Effect.Effect<void>
   readonly completeObjective: (id: string, evidence?: string) => Effect.Effect<void>
   readonly getChangelog: (since?: string, limit?: number) => Effect.Effect<EngagementSchema.ChangelogEntry[]>
+  readonly getChangelogSince: (since: string) => Effect.Effect<EngagementSchema.ChangelogEntry[]>
+  readonly markInjected: () => Effect.Effect<string>
+  readonly getLastInjectedTimestamp: () => Effect.Effect<string | undefined>
+  readonly addRelationship: (rel: EngagementSchema.Relationship) => Effect.Effect<boolean>
+  readonly getRelationships: (filter?: { entity_id?: string; rel_type?: string }) => Effect.Effect<readonly EngagementSchema.Relationship[]>
+  readonly deleteRelationship: (source_id: string, rel_type: string, target_id: string) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -78,6 +84,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const stateRef = yield* Ref.make<EngagementSchema.State | undefined>(undefined)
     const changelogRef = yield* Ref.make<EngagementSchema.ChangelogEntry[]>([])
+    const lastInjectedRef = yield* Ref.make<string | undefined>(undefined)
 
     const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
       Effect.gen(function* () {
@@ -405,6 +412,60 @@ const layer = Layer.effect(
           entries = entries.slice(-limit)
         }
         return entries
+      }),
+
+      getChangelogSince: Effect.fn("EngagementStore.getChangelogSince")(function* (since) {
+        const entries = yield* Ref.get(changelogRef)
+        return entries.filter((e) => e.timestamp > since)
+      }),
+
+      markInjected: Effect.fn("EngagementStore.markInjected")(function* () {
+        const ts = new Date().toISOString()
+        yield* Ref.set(lastInjectedRef, ts)
+        return ts
+      }),
+
+      getLastInjectedTimestamp: () => Ref.get(lastInjectedRef),
+
+      addRelationship: Effect.fn("EngagementStore.addRelationship")(function* (rel) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.relationships ?? []
+        const isDupe = existing.some(
+          (r) => r.source_id === rel.source_id && r.rel_type === rel.rel_type && r.target_id === rel.target_id,
+        )
+        if (isDupe) return false
+        yield* Ref.set(stateRef, { ...current, relationships: [...existing, rel] })
+        yield* logChange("add_relationship", "relationship", `${rel.source_id}->${rel.target_id}`, `${rel.source_type}:${rel.source_id} --[${rel.rel_type}]--> ${rel.target_type}:${rel.target_id}`)
+        return true
+      }),
+
+      getRelationships: Effect.fn("EngagementStore.getRelationships")(function* (filter) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return []
+        let rels = current.relationships ?? []
+        if (filter?.entity_id) {
+          const id = filter.entity_id
+          rels = rels.filter((r) => r.source_id === id || r.target_id === id)
+        }
+        if (filter?.rel_type) {
+          const rt = filter.rel_type
+          rels = rels.filter((r) => r.rel_type === rt)
+        }
+        return rels
+      }),
+
+      deleteRelationship: Effect.fn("EngagementStore.deleteRelationship")(function* (sourceId, relType, targetId) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.relationships ?? []
+        const filtered = existing.filter(
+          (r) => !(r.source_id === sourceId && r.rel_type === relType && r.target_id === targetId),
+        )
+        if (filtered.length === existing.length) return false
+        yield* Ref.set(stateRef, { ...current, relationships: filtered })
+        yield* logChange("delete_relationship", "relationship", `${sourceId}->${targetId}`, `Deleted ${relType} edge`)
+        return true
       }),
     })
   }),

@@ -235,7 +235,14 @@ export const NucleiParseTool = Tool.define(
             if (updatedState) yield* store.save(updatedState)
           }
 
-          const output = formatOutput(findings, shouldUpdate)
+          let output = formatOutput(findings, shouldUpdate)
+
+          if (shouldUpdate && findings.length > 0) {
+            const highSev = findings.filter((f) => f.severity === "critical" || f.severity === "high")
+            if (highSev.length > 0) {
+              output += `\n\n[Auto-critic] ${highSev.length} high/critical finding(s) should be validated. Spawn "critic" subagent to check for false positives before reporting.`
+            }
+          }
 
           return {
             title: `nuclei: ${findings.length} findings`,

@@ -26,6 +26,8 @@ Actions and their required data fields:
 - add_objective: { id: string, title: string, description?: string, status?: "not_started"|"in_progress"|"completed"|"blocked"|"abandoned", priority?: "critical"|"high"|"medium"|"low", category?: "ctf"|"pentest"|"bounty"|"red_team"|"custom", target_hosts?: string[], linked_vulns?: string[], linked_creds?: string[], flags?: string[], evidence?: string, notes?: string }
 - update_objective: { id: string, ...any fields from add_objective to patch }
 - complete_objective: { id: string, evidence?: string }
+- add_relationship: { source_type: "host"|"credential"|"vuln"|"service"|"domain"|"user"|"group", source_id: string, rel_type: "EXPLOITED_VIA"|"CREDENTIAL_FROM"|"REACHABLE_FROM"|"TRUSTS"|"MEMBER_OF"|"ADMIN_OF"|"PIVOT_TO"|"AUTHENTICATES_TO"|"LATERAL_MOVE"|"CONTROLS", target_type: (same as source_type), target_id: string, metadata?: string } — deduplicates by (source_id, rel_type, target_id)
+- delete_relationship: { source_id: string, rel_type: string, target_id: string }
 
 Notes:
 - add_host supports domain_info: { domain?: string, is_dc?: boolean, computer_account?: string, forest?: string }
