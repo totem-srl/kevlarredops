@@ -28,7 +28,20 @@ Actions and their required data fields:
 - complete_objective: { id: string, evidence?: string }
 - add_relationship: { source_type: "host"|"credential"|"vuln"|"service"|"domain"|"user"|"group", source_id: string, rel_type: "EXPLOITED_VIA"|"CREDENTIAL_FROM"|"REACHABLE_FROM"|"TRUSTS"|"MEMBER_OF"|"ADMIN_OF"|"PIVOT_TO"|"AUTHENTICATES_TO"|"LATERAL_MOVE"|"CONTROLS", target_type: (same as source_type), target_id: string, metadata?: string } — deduplicates by (source_id, rel_type, target_id)
 - delete_relationship: { source_id: string, rel_type: string, target_id: string }
+- add_decision: { decision: string, reasoning: string, alternatives?: string[], phase?: string, id?: string } — strategic decisions only (not tactical nmap flags). Auto-capped at 100.
+- update_decision_outcome: { id: string, outcome: "success"|"failure"|"partial"|"abandoned", notes?: string }
+- add_alert: { title: string, severity: "critical"|"high"|"medium"|"low"|"info", details?: string, source_agent?: string, host_ip?: string, ttl_minutes?: number, id?: string } — inter-agent urgent findings. TTL defaults 60min, max 50 active.
+- acknowledge_alert: { id: string }
+- add_live_session: { session_type: "shell"|"meterpreter"|"tunnel"|"listener"|"proxy", host_ip: string, port?: number, username?: string, pid?: number, details?: string, local_port?: number, remote_target?: string, id?: string }
+- update_live_session: { id: string, alive?: boolean, last_seen?: string, details?: string, pid?: number, local_port?: number, remote_target?: string }
+- remove_live_session: { id: string }
+- add_network_segment: { cidr: string, name?: string, vlan?: number, gateway?: string, reachable_from?: string[], pivot_host?: string, notes?: string, id?: string }
+- update_network_segment: { id: string, ...any fields from add_network_segment to patch }
+- remove_network_segment: { id: string }
 
 Notes:
 - add_host supports domain_info: { domain?: string, is_dc?: boolean, computer_account?: string, forest?: string }
 - add_credential supports AD fields: domain?: string, ticket_type?: string ("TGT"|"TGS"|"ST"), service_principal?: string, ticket_expiry?: string
+- Alerts: subagents should add_alert for urgent findings (e.g. DC found, creds dumped, critical vuln). Coordinator sees alerts in OODA context.
+- Sessions: track every shell, tunnel, listener, proxy. Mark alive:false when dead. Helps coordinator know what's reachable.
+- Segments: map discovered network segments, VLANs, pivot paths. Reachable_from links segments to pivot hosts.

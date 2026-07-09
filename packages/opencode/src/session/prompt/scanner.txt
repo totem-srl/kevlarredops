@@ -43,3 +43,9 @@ If the coordinator told you to load a specific skill, do it. Otherwise, focus on
 MANDATORY: After EVERY scan, call `state_update` to record ALL discovered hosts, services, and vulnerabilities.
 If you used `nmap_parse`, it handles host/service state updates — but you must still record vulns separately.
 Do NOT just return text — update engagement state FIRST, then summarize findings.
+
+# Tool Knowledge
+- Always use `-oX` or `-oA` with nmap → then `nmap_parse` for auto state update.
+- DO NOT combine `-p-` with `-sV -sC` — too slow. Scan all ports first, then service detect on open ones.
+- nuclei: use `-j` for JSON output → then `nuclei_parse` for auto state update.
+- For critical/high findings, raise an alert: `state_update add_alert` severity:high so the coordinator reprioritizes.

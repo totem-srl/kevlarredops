@@ -22,9 +22,14 @@ export const Parameters = Schema.Struct({
     "changelog",
     "diff",
     "relationships",
+    "decisions",
+    "alerts",
+    "sessions",
+    "segments",
+    "ooda",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff (recent changes), relationships (entity edges)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -362,6 +367,82 @@ export const StateQueryTool = Tool.define(
                 metadata: { count: filtered.length, total: rels.length },
                 output: `${label} (${filtered.length}):\n${lines.join("\n")}`,
               }
+            }
+
+            case "decisions": {
+              const limit = params.filter ? parseInt(params.filter, 10) || 20 : 20
+              const decisions = yield* store.getDecisions(limit)
+              if (decisions.length === 0) {
+                return { title: "Decisions", metadata: { count: 0 }, output: "No decisions recorded yet. Record strategic decisions with state_update (action: add_decision)." }
+              }
+              const lines = decisions.map((dec) => {
+                const out = dec.outcome ? ` → ${dec.outcome}` : ""
+                return `  [${dec.phase}] ${dec.id}: ${dec.decision}${out}\n    Reasoning: ${dec.reasoning}${dec.alternatives?.length ? `\n    Alternatives: ${dec.alternatives.join(", ")}` : ""}${dec.outcome_notes ? `\n    Notes: ${dec.outcome_notes}` : ""}`
+              })
+              return {
+                title: "Decisions",
+                metadata: { count: decisions.length },
+                output: `Decisions (last ${decisions.length}):\n\n${lines.join("\n\n")}`,
+              }
+            }
+
+            case "alerts": {
+              const active = yield* store.getActiveAlerts()
+              if (active.length === 0) {
+                return { title: "Alerts", metadata: { count: 0 }, output: "No active alerts." }
+              }
+              const lines = active.map((a) =>
+                `  [${a.severity.toUpperCase()}] ${a.id}: ${a.title}${a.host_ip ? ` host:${a.host_ip}` : ""}${a.source_agent ? ` from:${a.source_agent}` : ""}\n    ${a.details ?? "(no details)"}`,
+              )
+              return {
+                title: "Alerts",
+                metadata: { count: active.length },
+                output: `Active alerts (${active.length}):\n\n${lines.join("\n\n")}`,
+              }
+            }
+
+            case "sessions": {
+              const sessions = EngagementSchema.aliveSessions(state)
+              if (sessions.length === 0) {
+                return { title: "Sessions", metadata: { count: 0 }, output: "No live sessions. Track shells/tunnels with state_update (action: add_live_session)." }
+              }
+              const lines = sessions.map((s) => {
+                const port = s.port ? `:${s.port}` : ""
+                const tunnel = s.local_port ? ` local:${s.local_port}→${s.remote_target ?? "?"}` : ""
+                return `  [${s.session_type.toUpperCase()}] ${s.id}: ${s.host_ip}${port} as ${s.username ?? "?"}${tunnel}${s.pid ? ` pid:${s.pid}` : ""}\n    since ${s.established_at}${s.details ? ` — ${s.details}` : ""}`
+              })
+              return {
+                title: "Sessions",
+                metadata: { count: sessions.length },
+                output: `Live sessions (${sessions.length}):\n\n${lines.join("\n\n")}`,
+              }
+            }
+
+            case "segments": {
+              const segs = state.network_segments ?? []
+              if (segs.length === 0) {
+                return { title: "Segments", metadata: { count: 0 }, output: "No network segments recorded. Add with state_update (action: add_network_segment)." }
+              }
+              const lines = segs.map((seg) => {
+                const parts = [`  [${seg.id}] ${seg.cidr}`]
+                if (seg.name) parts[0] += ` (${seg.name})`
+                if (seg.vlan !== undefined) parts.push(`    VLAN: ${seg.vlan}`)
+                if (seg.gateway) parts.push(`    Gateway: ${seg.gateway}`)
+                if (seg.pivot_host) parts.push(`    Pivot host: ${seg.pivot_host}`)
+                if (seg.reachable_from?.length) parts.push(`    Reachable from: ${seg.reachable_from.join(", ")}`)
+                if (seg.notes) parts.push(`    Notes: ${seg.notes}`)
+                return parts.join("\n")
+              })
+              return {
+                title: "Segments",
+                metadata: { count: segs.length },
+                output: `Network segments (${segs.length}):\n\n${lines.join("\n\n")}`,
+              }
+            }
+
+            case "ooda": {
+              const ooda = EngagementSchema.toOODAContext(state, [])
+              return { title: "OODA Context", metadata: {}, output: ooda }
             }
 
             case "full": {

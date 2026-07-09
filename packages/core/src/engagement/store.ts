@@ -11,6 +11,7 @@ import * as path from "node:path"
 const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
 const LAST_FILE = ".last"
 const CHANGELOG_FILE = "changelog.json"
+const DECISIONS_FILE = "decisions.json"
 
 function mergeServices(
   existing: readonly EngagementSchema.Service[],
@@ -60,6 +61,22 @@ export interface Interface {
   readonly addRelationship: (rel: EngagementSchema.Relationship) => Effect.Effect<boolean>
   readonly getRelationships: (filter?: { entity_id?: string; rel_type?: string }) => Effect.Effect<readonly EngagementSchema.Relationship[]>
   readonly deleteRelationship: (source_id: string, rel_type: string, target_id: string) => Effect.Effect<boolean>
+  // Decision Memory
+  readonly addDecision: (decision: EngagementSchema.Decision) => Effect.Effect<void>
+  readonly updateDecisionOutcome: (id: string, outcome: string, notes?: string) => Effect.Effect<boolean>
+  readonly getDecisions: (limit?: number) => Effect.Effect<EngagementSchema.Decision[]>
+  // Alert Queue
+  readonly addAlert: (alert: EngagementSchema.Alert) => Effect.Effect<void>
+  readonly acknowledgeAlert: (id: string) => Effect.Effect<boolean>
+  readonly getActiveAlerts: () => Effect.Effect<EngagementSchema.Alert[]>
+  // Live Sessions
+  readonly addLiveSession: (session: EngagementSchema.LiveSession) => Effect.Effect<void>
+  readonly updateLiveSession: (id: string, patch: Record<string, unknown>) => Effect.Effect<boolean>
+  readonly removeLiveSession: (id: string) => Effect.Effect<boolean>
+  // Network Segments
+  readonly addNetworkSegment: (segment: EngagementSchema.NetworkSegment) => Effect.Effect<void>
+  readonly updateNetworkSegment: (id: string, patch: Record<string, unknown>) => Effect.Effect<boolean>
+  readonly removeNetworkSegment: (id: string) => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -70,6 +87,10 @@ function stateFilePath(name: string): string {
 
 function changelogFilePath(name: string): string {
   return path.join(ENGAGEMENTS_DIR, name, CHANGELOG_FILE)
+}
+
+function decisionsFilePath(name: string): string {
+  return path.join(ENGAGEMENTS_DIR, name, DECISIONS_FILE)
 }
 
 function lastFilePath(): string {
@@ -84,6 +105,7 @@ const layer = Layer.effect(
   Effect.gen(function* () {
     const stateRef = yield* Ref.make<EngagementSchema.State | undefined>(undefined)
     const changelogRef = yield* Ref.make<EngagementSchema.ChangelogEntry[]>([])
+    const decisionsRef = yield* Ref.make<EngagementSchema.Decision[]>([])
     const lastInjectedRef = yield* Ref.make<string | undefined>(undefined)
 
     const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
@@ -120,6 +142,28 @@ const layer = Layer.effect(
         if (!fs.existsSync(filePath)) return []
         const raw = fs.readFileSync(filePath, "utf-8")
         return JSON.parse(raw) as EngagementSchema.ChangelogEntry[]
+      } catch {
+        return []
+      }
+    }
+
+    const persistDecisions = (name: string, entries: EngagementSchema.Decision[]) => {
+      try {
+        const filePath = decisionsFilePath(name)
+        const dir = path.dirname(filePath)
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        fs.writeFileSync(filePath, JSON.stringify(entries, undefined, 2), { encoding: "utf-8", mode: 0o600 })
+      } catch {
+        // decisions persistence is best-effort
+      }
+    }
+
+    const loadDecisions = (name: string): EngagementSchema.Decision[] => {
+      try {
+        const filePath = decisionsFilePath(name)
+        if (!fs.existsSync(filePath)) return []
+        const raw = fs.readFileSync(filePath, "utf-8")
+        return JSON.parse(raw) as EngagementSchema.Decision[]
       } catch {
         return []
       }
@@ -164,6 +208,8 @@ const layer = Layer.effect(
         yield* persist(updated)
         const entries = yield* Ref.get(changelogRef)
         persistChangelogEntries(updated.name, entries)
+        const decisions = yield* Ref.get(decisionsRef)
+        if (decisions.length > 0) persistDecisions(updated.name, decisions)
       }),
 
       create: Effect.fn("EngagementStore.create")(function* (name) {
@@ -184,6 +230,7 @@ const layer = Layer.effect(
         }
         yield* Ref.set(stateRef, state)
         yield* Ref.set(changelogRef, [])
+        yield* Ref.set(decisionsRef, [])
         yield* persist(state)
         yield* logChange("create_engagement", "engagement", state.id, `Created engagement "${name}"`)
         return state
@@ -194,6 +241,7 @@ const layer = Layer.effect(
         if (state) {
           yield* Ref.set(stateRef, state)
           yield* Ref.set(changelogRef, loadChangelog(name))
+          yield* Ref.set(decisionsRef, loadDecisions(name))
         }
         return state
       }),
@@ -465,6 +513,146 @@ const layer = Layer.effect(
         if (filtered.length === existing.length) return false
         yield* Ref.set(stateRef, { ...current, relationships: filtered })
         yield* logChange("delete_relationship", "relationship", `${sourceId}->${targetId}`, `Deleted ${relType} edge`)
+        return true
+      }),
+
+      // --- Decision Memory ---
+      addDecision: Effect.fn("EngagementStore.addDecision")(function* (decision) {
+        const current = yield* Ref.get(decisionsRef)
+        const updated = [...current, decision]
+        const trimmed = updated.length > EngagementSchema.DECISIONS_MAX_ENTRIES
+          ? updated.slice(updated.length - EngagementSchema.DECISIONS_MAX_ENTRIES)
+          : updated
+        yield* Ref.set(decisionsRef, trimmed)
+        yield* logChange("add_decision", "decision", decision.id, `[${decision.phase}] ${decision.decision}`)
+      }),
+
+      updateDecisionOutcome: Effect.fn("EngagementStore.updateDecisionOutcome")(function* (id, outcome, notes) {
+        const current = yield* Ref.get(decisionsRef)
+        const idx = current.findIndex((d) => d.id === id)
+        if (idx === -1) return false
+        const updated = [...current]
+        updated[idx] = { ...updated[idx]!, outcome: outcome as EngagementSchema.DecisionOutcome, ...(notes ? { outcome_notes: notes } : {}) }
+        yield* Ref.set(decisionsRef, updated)
+        yield* logChange("update_decision", "decision", id, `Outcome: ${outcome}${notes ? ` — ${notes}` : ""}`)
+        return true
+      }),
+
+      getDecisions: Effect.fn("EngagementStore.getDecisions")(function* (limit) {
+        const entries = yield* Ref.get(decisionsRef)
+        return limit ? entries.slice(-limit) : entries
+      }),
+
+      // --- Alert Queue ---
+      addAlert: Effect.fn("EngagementStore.addAlert")(function* (alert) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const existing = current.alerts ?? []
+        // Expire old alerts first
+        const now = Date.now()
+        const active = existing.filter((a) => {
+          if (a.acknowledged) return false
+          const ttl = (a.ttl_minutes ?? EngagementSchema.ALERTS_DEFAULT_TTL_MINUTES) * 60 * 1000
+          return now - new Date(a.timestamp).getTime() < ttl
+        })
+        const capped = active.length >= EngagementSchema.ALERTS_MAX_ACTIVE
+          ? [...active.slice(1), alert]
+          : [...active, alert]
+        yield* Ref.set(stateRef, { ...current, alerts: capped })
+        yield* logChange("add_alert", "alert", alert.id, `[${alert.severity.toUpperCase()}] ${alert.title}${alert.source_agent ? ` from:${alert.source_agent}` : ""}`)
+      }),
+
+      acknowledgeAlert: Effect.fn("EngagementStore.acknowledgeAlert")(function* (id) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.alerts ?? []
+        const idx = existing.findIndex((a) => a.id === id)
+        if (idx === -1) return false
+        const updated = [...existing]
+        updated[idx] = { ...updated[idx]!, acknowledged: true }
+        yield* Ref.set(stateRef, { ...current, alerts: updated })
+        return true
+      }),
+
+      getActiveAlerts: Effect.fn("EngagementStore.getActiveAlerts")(function* () {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return []
+        return EngagementSchema.activeAlerts(current)
+      }),
+
+      // --- Live Sessions ---
+      addLiveSession: Effect.fn("EngagementStore.addLiveSession")(function* (session) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const existing = current.live_sessions ?? []
+        const isDupe = existing.some((s) => s.id === session.id)
+        if (isDupe) {
+          const updated = existing.map((s) => s.id === session.id ? { ...s, ...session } : s)
+          yield* Ref.set(stateRef, { ...current, live_sessions: updated })
+        } else {
+          yield* Ref.set(stateRef, { ...current, live_sessions: [...existing, session] })
+          yield* logChange("add_session", "live_session", session.id, `${session.session_type} on ${session.host_ip}${session.port ? `:${session.port}` : ""} as ${session.username ?? "?"}`)
+        }
+      }),
+
+      updateLiveSession: Effect.fn("EngagementStore.updateLiveSession")(function* (id, patch) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.live_sessions ?? []
+        const idx = existing.findIndex((s) => s.id === id)
+        if (idx === -1) return false
+        const updated = [...existing]
+        updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.LiveSession
+        yield* Ref.set(stateRef, { ...current, live_sessions: updated })
+        return true
+      }),
+
+      removeLiveSession: Effect.fn("EngagementStore.removeLiveSession")(function* (id) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.live_sessions ?? []
+        const filtered = existing.filter((s) => s.id !== id)
+        if (filtered.length === existing.length) return false
+        yield* Ref.set(stateRef, { ...current, live_sessions: filtered })
+        yield* logChange("remove_session", "live_session", id, `Session ${id} removed`)
+        return true
+      }),
+
+      // --- Network Segments ---
+      addNetworkSegment: Effect.fn("EngagementStore.addNetworkSegment")(function* (segment) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const existing = current.network_segments ?? []
+        const isDupe = existing.some((s) => s.id === segment.id)
+        if (isDupe) {
+          const updated = existing.map((s) => s.id === segment.id ? { ...s, ...segment } : s)
+          yield* Ref.set(stateRef, { ...current, network_segments: updated })
+        } else {
+          yield* Ref.set(stateRef, { ...current, network_segments: [...existing, segment] })
+          yield* logChange("add_segment", "network_segment", segment.id, `${segment.cidr}${segment.vlan !== undefined ? ` VLAN:${segment.vlan}` : ""}${segment.pivot_host ? ` via ${segment.pivot_host}` : ""}`)
+        }
+      }),
+
+      updateNetworkSegment: Effect.fn("EngagementStore.updateNetworkSegment")(function* (id, patch) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.network_segments ?? []
+        const idx = existing.findIndex((s) => s.id === id)
+        if (idx === -1) return false
+        const updated = [...existing]
+        updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.NetworkSegment
+        yield* Ref.set(stateRef, { ...current, network_segments: updated })
+        return true
+      }),
+
+      removeNetworkSegment: Effect.fn("EngagementStore.removeNetworkSegment")(function* (id) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return false
+        const existing = current.network_segments ?? []
+        const filtered = existing.filter((s) => s.id !== id)
+        if (filtered.length === existing.length) return false
+        yield* Ref.set(stateRef, { ...current, network_segments: filtered })
+        yield* logChange("remove_segment", "network_segment", id, `Segment ${id} removed`)
         return true
       }),
     })

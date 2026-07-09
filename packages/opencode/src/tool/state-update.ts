@@ -32,6 +32,16 @@ export const Parameters = Schema.Struct({
     "complete_objective",
     "add_relationship",
     "delete_relationship",
+    "add_decision",
+    "update_decision_outcome",
+    "add_alert",
+    "acknowledge_alert",
+    "add_live_session",
+    "update_live_session",
+    "remove_live_session",
+    "add_network_segment",
+    "update_network_segment",
+    "remove_network_segment",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -728,6 +738,253 @@ export const StateUpdateTool = Tool.define(
                 title: `Rel deleted`,
                 metadata: { source: sourceId, target: targetId },
                 output: `Relationship deleted: ${sourceId} --[${relType}]--> ${targetId}${updated ? `\n${countsLine(updated)}` : ""}`,
+              }
+            }
+
+            // --- Decision Memory ---
+            case "add_decision": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const decision = d.decision as string
+              const reasoning = d.reasoning as string
+              if (!decision || !reasoning) {
+                return { title: "Error", metadata: {}, output: "Error: data.decision and data.reasoning are required for add_decision." }
+              }
+              const entry = {
+                id: d.id as string || `dec-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                phase: (d.phase as EngagementSchema.PentestPhase) || state.current_phase,
+                decision,
+                reasoning,
+                alternatives: d.alternatives as string[] | undefined,
+                outcome: undefined as EngagementSchema.DecisionOutcome | undefined,
+                outcome_notes: undefined as string | undefined,
+              }
+              yield* store.addDecision(entry)
+              yield* store.save(state)
+              return {
+                title: `Decision: ${decision.slice(0, 50)}`,
+                metadata: { id: entry.id, phase: entry.phase },
+                output: `Decision recorded [${entry.id}]: ${decision}\nReasoning: ${reasoning}${entry.alternatives?.length ? `\nAlternatives: ${entry.alternatives.join(", ")}` : ""}`,
+              }
+            }
+
+            case "update_decision_outcome": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              const outcome = d.outcome as string
+              if (!id || !outcome) {
+                return { title: "Error", metadata: {}, output: "Error: data.id and data.outcome (success|failure|partial|abandoned) are required." }
+              }
+              const ok = yield* store.updateDecisionOutcome(id, outcome, d.notes as string | undefined)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Decision "${id}" not found.` }
+              }
+              yield* store.save(state)
+              return {
+                title: `Decision outcome: ${id}`,
+                metadata: { id, outcome },
+                output: `Decision "${id}" outcome set to ${outcome}.${d.notes ? ` Notes: ${d.notes}` : ""}`,
+              }
+            }
+
+            // --- Alert Queue ---
+            case "add_alert": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const title = d.title as string
+              const severity = d.severity as string
+              if (!title || !severity) {
+                return { title: "Error", metadata: {}, output: "Error: data.title and data.severity (critical|high|medium|low|info) are required." }
+              }
+              const alert = {
+                id: d.id as string || `alert-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                severity: severity as EngagementSchema.AlertSeverity,
+                source_agent: d.source_agent as string | undefined,
+                title,
+                details: d.details as string | undefined,
+                host_ip: d.host_ip as string | undefined,
+                acknowledged: false,
+                ttl_minutes: d.ttl_minutes as number | undefined,
+              }
+              yield* store.addAlert(alert)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Alert: ${title}`,
+                metadata: { id: alert.id, severity },
+                output: `Alert raised [${severity.toUpperCase()}]: ${title}${d.host_ip ? ` host:${d.host_ip}` : ""}${d.source_agent ? ` from:${d.source_agent}` : ""}`,
+              }
+            }
+
+            case "acknowledge_alert": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for acknowledge_alert." }
+              }
+              const ok = yield* store.acknowledgeAlert(id)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Alert "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Alert acked: ${id}`,
+                metadata: { id },
+                output: `Alert "${id}" acknowledged.`,
+              }
+            }
+
+            // --- Live Sessions ---
+            case "add_live_session": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const sessionType = d.session_type as string
+              const hostIp = d.host_ip as string
+              if (!sessionType || !hostIp) {
+                return { title: "Error", metadata: {}, output: "Error: data.session_type (shell|meterpreter|tunnel|listener|proxy) and data.host_ip are required." }
+              }
+              const session = {
+                id: d.id as string || `sess-${Date.now()}`,
+                session_type: sessionType as EngagementSchema.SessionType,
+                host_ip: hostIp,
+                port: d.port as number | undefined,
+                username: d.username as string | undefined,
+                pid: d.pid as number | undefined,
+                established_at: new Date().toISOString(),
+                last_seen: new Date().toISOString(),
+                alive: true,
+                details: d.details as string | undefined,
+                local_port: d.local_port as number | undefined,
+                remote_target: d.remote_target as string | undefined,
+              }
+              yield* store.addLiveSession(session)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Session: ${sessionType} on ${hostIp}`,
+                metadata: { id: session.id, type: sessionType, host: hostIp },
+                output: `Live session added [${session.id}]: ${sessionType} on ${hostIp}${d.port ? `:${d.port}` : ""} as ${d.username ?? "?"}`,
+              }
+            }
+
+            case "update_live_session": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for update_live_session." }
+              }
+              const patch: Record<string, unknown> = {}
+              for (const key of ["alive", "last_seen", "details", "pid", "local_port", "remote_target"]) {
+                if (d[key] !== undefined) patch[key] = d[key]
+              }
+              const ok = yield* store.updateLiveSession(id, patch)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Live session "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Session updated: ${id}`,
+                metadata: { id },
+                output: `Live session "${id}" updated (${Object.keys(patch).join(", ")}).`,
+              }
+            }
+
+            case "remove_live_session": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for remove_live_session." }
+              }
+              const ok = yield* store.removeLiveSession(id)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Live session "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Session removed: ${id}`,
+                metadata: { id },
+                output: `Live session "${id}" removed.`,
+              }
+            }
+
+            // --- Network Segments ---
+            case "add_network_segment": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const cidr = d.cidr as string
+              if (!cidr) {
+                return { title: "Error", metadata: {}, output: "Error: data.cidr is required for add_network_segment." }
+              }
+              const segment = {
+                id: d.id as string || `seg-${Date.now()}`,
+                name: d.name as string | undefined,
+                cidr,
+                vlan: d.vlan as number | undefined,
+                gateway: d.gateway as string | undefined,
+                reachable_from: d.reachable_from as string[] | undefined,
+                pivot_host: d.pivot_host as string | undefined,
+                notes: d.notes as string | undefined,
+              }
+              yield* store.addNetworkSegment(segment)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Segment: ${cidr}`,
+                metadata: { id: segment.id, cidr },
+                output: `Network segment added [${segment.id}]: ${cidr}${d.vlan !== undefined ? ` VLAN:${d.vlan}` : ""}${d.pivot_host ? ` via pivot:${d.pivot_host}` : ""}${d.name ? ` (${d.name})` : ""}`,
+              }
+            }
+
+            case "update_network_segment": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for update_network_segment." }
+              }
+              const patch: Record<string, unknown> = {}
+              for (const key of ["name", "cidr", "vlan", "gateway", "reachable_from", "pivot_host", "notes"]) {
+                if (d[key] !== undefined) patch[key] = d[key]
+              }
+              const ok = yield* store.updateNetworkSegment(id, patch)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Network segment "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Segment updated: ${id}`,
+                metadata: { id },
+                output: `Network segment "${id}" updated (${Object.keys(patch).join(", ")}).`,
+              }
+            }
+
+            case "remove_network_segment": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const id = d.id as string
+              if (!id) {
+                return { title: "Error", metadata: {}, output: "Error: data.id is required for remove_network_segment." }
+              }
+              const ok = yield* store.removeNetworkSegment(id)
+              if (!ok) {
+                return { title: "Error", metadata: {}, output: `Network segment "${id}" not found.` }
+              }
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Segment removed: ${id}`,
+                metadata: { id },
+                output: `Network segment "${id}" removed.`,
               }
             }
 

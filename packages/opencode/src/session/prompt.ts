@@ -1318,9 +1318,10 @@ const layer = Layer.effect(
                   if (modeDirective) lines.push("", modeDirective)
                   if (transitionHint) lines.push("", transitionHint)
 
+                  let recentChanges: EngagementSchema.ChangelogEntry[] = []
                   const lastTs = yield* engagement.getLastInjectedTimestamp()
                   if (lastTs) {
-                    const recentChanges = yield* engagement.getChangelogSince(lastTs)
+                    recentChanges = yield* engagement.getChangelogSince(lastTs)
                     const diff = EngagementSchema.toDiffContext(recentChanges)
                     if (diff) {
                       lines.push("", diff)
@@ -1329,6 +1330,8 @@ const layer = Layer.effect(
                   yield* engagement.markInjected()
 
                   lines.push(
+                    "",
+                    EngagementSchema.toOODAContext(state, recentChanges),
                     "",
                     "Current engagement state:",
                     EngagementSchema.toCompactContext(state),

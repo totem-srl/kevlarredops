@@ -17,3 +17,8 @@ Supported query types:
 - changelog: Show recent state changes (filter = number of entries to show, default 50)
 - diff: Show changes since last prompt injection — what happened since the LLM last saw the state
 - relationships: Show entity relationships/edges (filter by rel_type, source_id, or target_id)
+- decisions: Show strategic decision log (filter = number of entries, default 20)
+- alerts: Show active (un-acknowledged, non-expired) alerts from all agents
+- sessions: Show live sessions — shells, tunnels, listeners, proxies currently alive
+- segments: Show discovered network segments, VLANs, pivot paths
+- ooda: Full situation-awareness context — changes, coverage gaps, alerts, sessions, segments, tasks, objectives

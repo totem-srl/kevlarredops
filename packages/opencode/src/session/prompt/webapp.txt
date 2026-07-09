@@ -74,3 +74,10 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 - Got access (admin panel, API as different user) → `add_access` RIGHT NOW
 - Each attack step → `add_attack_step` RIGHT NOW
 - Discovered new endpoint/service → `add_host` if new IP/domain RIGHT NOW
+
+# Alert the Coordinator
+For URGENT findings:
+- RCE achieved (SSTI, deserialization, command injection) → `state_update add_alert` severity:critical
+- SQL injection confirmed → `state_update add_alert` severity:high
+- Admin panel access → `state_update add_alert` severity:high
+- Parse gobuster/feroxbuster output with `gobuster_parse` for auto state update.

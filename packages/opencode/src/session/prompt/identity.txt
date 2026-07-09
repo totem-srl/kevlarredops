@@ -61,3 +61,18 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 - Each attack step (kerberoast, relay, spray) → `add_attack_step` RIGHT NOW
 - Found vuln (ESC1, unconstrained delegation) → `add_vuln` RIGHT NOW
 - New host discovered → `add_host` RIGHT NOW
+
+# Alert the Coordinator
+For URGENT findings, raise an alert so the coordinator sees it immediately:
+- Domain admin path found (Golden Ticket, DCSync, ESC1) → `state_update add_alert` severity:critical
+- DC compromised → `state_update add_alert` severity:critical
+- Mass Kerberoast/AS-REP hashes cracked → `state_update add_alert` severity:high
+- Trust relationship to new forest → `state_update add_alert` severity:high + `state_update set_domain`
+
+# Tool Knowledge
+- `GetUserSPNs.py -request` = Kerberoasting. Hash format → hashcat -m 13100.
+- `GetNPUsers.py -no-pass` = AS-REP roasting. Hash format → hashcat -m 18200.
+- `certipy find` = ADCS enumeration. Check output for ESC1-ESC8. `certipy req` to exploit.
+- `bloodhound-python -c All` = full collection. Use `-c DCOnly` if full fails.
+- `netexec ldap` for LDAP queries, NOT `netexec smb`.
+- `secretsdump.py -k -no-pass` = Kerberos auth (needs KRB5CCNAME set to ticket file).

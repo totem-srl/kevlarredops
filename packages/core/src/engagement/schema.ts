@@ -217,6 +217,81 @@ export const Relationship = Schema.Struct({
 }).annotate({ identifier: "Engagement.Relationship" })
 export type Relationship = typeof Relationship.Type
 
+// --- Decision Memory ---
+
+export const DecisionOutcome = Schema.Literals(["pending", "successful", "failed", "abandoned", "superseded"])
+export type DecisionOutcome = typeof DecisionOutcome.Type
+
+export const Decision = Schema.Struct({
+  id: Schema.String,
+  timestamp: Schema.String,
+  phase: PentestPhase,
+  decision: Schema.String,
+  reasoning: Schema.String,
+  alternatives: Schema.optional(Schema.Array(Schema.String)),
+  outcome: Schema.optional(DecisionOutcome),
+  outcome_notes: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Decision" })
+export type Decision = typeof Decision.Type
+
+export const DECISIONS_MAX_ENTRIES = 100
+
+// --- Alert Queue ---
+
+export const AlertSeverity = Schema.Literals(["critical", "high", "medium", "info"])
+export type AlertSeverity = typeof AlertSeverity.Type
+
+export const Alert = Schema.Struct({
+  id: Schema.String,
+  timestamp: Schema.String,
+  severity: AlertSeverity,
+  source_agent: Schema.optional(Schema.String),
+  title: Schema.String,
+  details: Schema.optional(Schema.String),
+  host_ip: Schema.optional(Schema.String),
+  acknowledged: Schema.optional(Schema.Boolean),
+  ttl_minutes: Schema.optional(Schema.Number),
+}).annotate({ identifier: "Engagement.Alert" })
+export type Alert = typeof Alert.Type
+
+export const ALERTS_MAX_ACTIVE = 50
+export const ALERTS_DEFAULT_TTL_MINUTES = 60
+
+// --- Live Sessions (shells, tunnels, listeners) ---
+
+export const SessionType = Schema.Literals(["shell", "listener", "tunnel", "socks_proxy", "port_forward"])
+export type SessionType = typeof SessionType.Type
+
+export const LiveSession = Schema.Struct({
+  id: Schema.String,
+  session_type: SessionType,
+  host_ip: Schema.String,
+  port: Schema.optional(Schema.Number),
+  username: Schema.optional(Schema.String),
+  pid: Schema.optional(Schema.Number),
+  established_at: Schema.String,
+  last_seen: Schema.optional(Schema.String),
+  alive: Schema.optional(Schema.Boolean),
+  details: Schema.optional(Schema.String),
+  local_port: Schema.optional(Schema.Number),
+  remote_target: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.LiveSession" })
+export type LiveSession = typeof LiveSession.Type
+
+// --- Network Segmentation ---
+
+export const NetworkSegment = Schema.Struct({
+  id: Schema.String,
+  name: Schema.optional(Schema.String),
+  cidr: Schema.String,
+  vlan: Schema.optional(Schema.Number),
+  gateway: Schema.optional(Schema.String),
+  reachable_from: Schema.optional(Schema.Array(Schema.String)),
+  pivot_host: Schema.optional(Schema.String),
+  notes: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.NetworkSegment" })
+export type NetworkSegment = typeof NetworkSegment.Type
+
 export const State = Schema.Struct({
   id: ID,
   name: Schema.String,
@@ -232,6 +307,9 @@ export const State = Schema.Struct({
   objectives: Schema.optional(Schema.Record(Schema.String, Objective)),
   domain: Schema.optional(DomainState),
   relationships: Schema.optional(Schema.Array(Relationship)),
+  alerts: Schema.optional(Schema.Array(Alert)),
+  live_sessions: Schema.optional(Schema.Array(LiveSession)),
+  network_segments: Schema.optional(Schema.Array(NetworkSegment)),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -288,6 +366,100 @@ export function criticHint(state: State): string | undefined {
   for (const [ip, vulns] of byHost) {
     lines.push(`  ${ip}: ${vulns.join(", ")}`)
   }
+  return lines.join("\n")
+}
+
+export function activeAlerts(state: State): Alert[] {
+  const now = Date.now()
+  return (state.alerts ?? []).filter((a) => {
+    if (a.acknowledged) return false
+    const ttl = (a.ttl_minutes ?? ALERTS_DEFAULT_TTL_MINUTES) * 60 * 1000
+    const created = new Date(a.timestamp).getTime()
+    return now - created < ttl
+  })
+}
+
+export function aliveSessions(state: State): LiveSession[] {
+  return (state.live_sessions ?? []).filter((s) => s.alive !== false)
+}
+
+export function toOODAContext(state: State, recentChanges: ChangelogEntry[]): string {
+  const s = summary(state)
+  const lines: string[] = ["<situation-awareness>"]
+
+  // Changes
+  if (recentChanges.length > 0) {
+    lines.push(`  Recent changes: ${recentChanges.length} mutations since last turn`)
+    const byType = new Map<string, number>()
+    for (const e of recentChanges) {
+      byType.set(e.entity_type, (byType.get(e.entity_type) ?? 0) + 1)
+    }
+    lines.push(`    ${[...byType.entries()].map(([k, v]) => `${k}:${v}`).join(" ")}`)
+  }
+
+  // Coverage
+  const totalHosts = s.hosts_discovered
+  const enumerated = Object.values(state.hosts).filter((h) => h.services.length > 0).length
+  const assessed = Object.values(state.hosts).filter((h) => h.vulns.length > 0).length
+  const accessed = s.hosts_compromised
+  lines.push(`  Coverage: ${totalHosts} hosts → ${enumerated} enumerated → ${assessed} assessed → ${accessed} compromised`)
+  if (s.unchecked_services > 0) lines.push(`  Gaps: ${s.unchecked_services} services without version info`)
+
+  // Unvalidated findings
+  const unval = unvalidatedVulns(state)
+  if (unval.length > 0) lines.push(`  Unvalidated: ${unval.length} finding(s) need critic review`)
+
+  // Alerts
+  const alerts = activeAlerts(state)
+  if (alerts.length > 0) {
+    lines.push(`  ALERTS (${alerts.length}):`)
+    for (const a of alerts.slice(0, 5)) {
+      lines.push(`    [${a.severity.toUpperCase()}] ${a.title}${a.host_ip ? ` on ${a.host_ip}` : ""}${a.source_agent ? ` (from ${a.source_agent})` : ""}`)
+    }
+    if (alerts.length > 5) lines.push(`    ... and ${alerts.length - 5} more`)
+  }
+
+  // Live sessions
+  const sessions = aliveSessions(state)
+  if (sessions.length > 0) {
+    lines.push(`  Live sessions (${sessions.length}):`)
+    for (const sess of sessions) {
+      const detail = sess.session_type === "tunnel" || sess.session_type === "port_forward"
+        ? ` → ${sess.remote_target ?? "?"}${sess.local_port ? ` local:${sess.local_port}` : ""}`
+        : sess.username ? ` as ${sess.username}` : ""
+      lines.push(`    ${sess.session_type}: ${sess.host_ip}${sess.port ? `:${sess.port}` : ""}${detail}`)
+    }
+  }
+
+  // Network segments
+  const segments = state.network_segments ?? []
+  if (segments.length > 0) {
+    lines.push(`  Network segments (${segments.length}):`)
+    for (const seg of segments) {
+      const pivot = seg.pivot_host ? ` via ${seg.pivot_host}` : ""
+      const reach = seg.reachable_from?.length ? ` reachable_from:[${seg.reachable_from.join(",")}]` : ""
+      lines.push(`    ${seg.id}: ${seg.cidr}${seg.vlan !== undefined ? ` VLAN:${seg.vlan}` : ""}${pivot}${reach}`)
+    }
+  }
+
+  // Ready tasks
+  const pending = state.task_tree.filter((t) => t.status === "pending")
+  const inProgress = state.task_tree.filter((t) => t.status === "in_progress")
+  if (inProgress.length > 0 || pending.length > 0) {
+    lines.push(`  Tasks: ${inProgress.length} in-progress, ${pending.length} pending`)
+  }
+
+  // Objectives progress
+  if (state.objectives) {
+    const objs = Object.values(state.objectives)
+    const completed = objs.filter((o) => o.status === "completed").length
+    const blocked = objs.filter((o) => o.status === "blocked").length
+    if (objs.length > 0) {
+      lines.push(`  Objectives: ${completed}/${objs.length} completed${blocked > 0 ? `, ${blocked} blocked` : ""}`)
+    }
+  }
+
+  lines.push("</situation-awareness>")
   return lines.join("\n")
 }
 
@@ -391,6 +563,38 @@ export function toCompactContext(state: State, maxHosts = 20): string {
 
   if (state.relationships && state.relationships.length > 0) {
     data.relationships = state.relationships.map((r) => `${r.source_type}:${r.source_id}-[${r.rel_type}]->${r.target_type}:${r.target_id}`)
+  }
+
+  const alerts = activeAlerts(state)
+  if (alerts.length > 0) {
+    data.alerts = alerts.map((a) => ({
+      severity: a.severity,
+      title: a.title,
+      ...(a.host_ip ? { host: a.host_ip } : {}),
+      ...(a.source_agent ? { from: a.source_agent } : {}),
+    }))
+  }
+
+  const sessions = aliveSessions(state)
+  if (sessions.length > 0) {
+    data.live_sessions = sessions.map((s) => ({
+      type: s.session_type,
+      host: s.host_ip,
+      ...(s.port ? { port: s.port } : {}),
+      ...(s.username ? { user: s.username } : {}),
+      ...(s.remote_target ? { target: s.remote_target } : {}),
+    }))
+  }
+
+  const segments = state.network_segments ?? []
+  if (segments.length > 0) {
+    data.network_segments = segments.map((seg) => ({
+      id: seg.id,
+      cidr: seg.cidr,
+      ...(seg.vlan !== undefined ? { vlan: seg.vlan } : {}),
+      ...(seg.pivot_host ? { pivot: seg.pivot_host } : {}),
+      ...(seg.reachable_from?.length ? { reachable_from: seg.reachable_from } : {}),
+    }))
   }
 
   return JSON.stringify(data, undefined, 2)

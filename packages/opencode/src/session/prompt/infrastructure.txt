@@ -74,3 +74,15 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 - Got access (shell, db login, SNMP read) → `add_access` RIGHT NOW
 - Found credentials → `add_credential` RIGHT NOW
 - Each attack step → `add_attack_step` RIGHT NOW
+
+# Alert the Coordinator
+For URGENT findings, raise an alert so the coordinator sees it immediately:
+- RCE via database (xp_cmdshell, UDF, COPY TO) → `state_update add_alert` severity:critical
+- Unauthenticated access to critical service → `state_update add_alert` severity:high
+- New network segment discovered via SNMP/routing → `state_update add_alert` severity:high + `add_network_segment`
+- IPMI cipher zero (no-auth admin) → `state_update add_alert` severity:critical
+
+# Track Sessions & Segments
+- DB shells (xp_cmdshell, \! in psql) → `add_live_session` session_type:"shell"
+- Discovered subnets/VLANs (via routing table, SNMP, ARP) → `add_network_segment` with reachable_from
+- Set `pivot_host` on segments only reachable via a compromised host
