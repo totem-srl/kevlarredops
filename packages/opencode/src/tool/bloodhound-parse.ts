@@ -460,14 +460,22 @@ export const BloodHoundParseTool = Tool.define(
 
                 // Flag unconstrained delegation as vuln
                 if (c.unconstraineddelegation) {
+                  const udEvidence = `BloodHound: unconstraineddelegation=true, ObjectIdentifier=${c.objectid}`
                   yield* store.addVuln(hostKey, {
                     id: `unconstrained-delegation-${hostnameToIp(c.name)}`,
                     title: `Unconstrained Delegation: ${c.name}`,
                     severity: "high",
                     status: "confirmed",
+                    confidence: 0.9,
                     description:
                       "Computer account has unconstrained delegation enabled. An attacker who compromises this host can extract TGTs from memory for any user that authenticates to it.",
-                    evidence: `BloodHound: unconstraineddelegation=true, ObjectIdentifier=${c.objectid}`,
+                    evidence: udEvidence,
+                    evidence_items: [{
+                      tool: "bloodhound",
+                      output: udEvidence,
+                      timestamp: new Date().toISOString(),
+                      confidence: 0.9,
+                    }],
                     references: ["https://attack.mitre.org/techniques/T1558/"],
                   })
                   vulnsAdded++
@@ -548,13 +556,21 @@ export const BloodHoundParseTool = Tool.define(
                     : "SPN set"
                 const safeUsername = u.name.toLowerCase().replace(/[^a-z0-9_@.-]/g, "_")
 
+                const kerbEvidence = `BloodHound: hasspn=true, SPNs: ${spns}, ObjectIdentifier=${u.objectid}`
                 yield* store.addVuln(hostKey, {
                   id: `kerberoast-${safeUsername}`,
                   title: `Kerberoastable Service Account: ${u.name}`,
                   severity: "high",
                   status: "confirmed",
+                  confidence: 0.9,
                   description: `User ${u.name} has SPNs set and is kerberoastable. Request a TGS ticket and crack offline to recover the plaintext password.`,
-                  evidence: `BloodHound: hasspn=true, SPNs: ${spns}, ObjectIdentifier=${u.objectid}`,
+                  evidence: kerbEvidence,
+                  evidence_items: [{
+                    tool: "bloodhound",
+                    output: kerbEvidence,
+                    timestamp: new Date().toISOString(),
+                    confidence: 0.9,
+                  }],
                   references: ["https://attack.mitre.org/techniques/T1558/003/"],
                 })
                 vulnsAdded++
@@ -585,13 +601,21 @@ export const BloodHoundParseTool = Tool.define(
 
                 const safeUsername = u.name.toLowerCase().replace(/[^a-z0-9_@.-]/g, "_")
 
+                const asrepEvidence = `BloodHound: dontreqpreauth=true, ObjectIdentifier=${u.objectid}`
                 yield* store.addVuln(hostKey, {
                   id: `asrep-roast-${safeUsername}`,
                   title: `AS-REP Roastable Account: ${u.name}`,
                   severity: "high",
                   status: "confirmed",
+                  confidence: 0.9,
                   description: `User ${u.name} does not require Kerberos pre-authentication. Request an AS-REP and crack offline.`,
-                  evidence: `BloodHound: dontreqpreauth=true, ObjectIdentifier=${u.objectid}`,
+                  evidence: asrepEvidence,
+                  evidence_items: [{
+                    tool: "bloodhound",
+                    output: asrepEvidence,
+                    timestamp: new Date().toISOString(),
+                    confidence: 0.9,
+                  }],
                   references: ["https://attack.mitre.org/techniques/T1558/004/"],
                 })
                 vulnsAdded++
@@ -738,13 +762,21 @@ export const BloodHoundParseTool = Tool.define(
                       domain_info: { domain: domainName },
                     })
 
+                    const trustEvidence = `BloodHound: TrustDirection=${t.TrustDirection}, TrustType=${t.TrustType}, IsTransitive=${t.IsTransitive}`
                     yield* store.addVuln(hostKey, {
                       id: `bidirectional-trust-${t.TargetDomainName.toLowerCase().replace(/[^a-z0-9.-]/g, "_")}`,
                       title: `Bidirectional Domain Trust: ${t.TargetDomainName}`,
                       severity: "medium",
                       status: "confirmed",
+                      confidence: 0.9,
                       description: `Bidirectional trust exists between ${domainName} and ${t.TargetDomainName}. This may allow lateral movement across domain boundaries.`,
-                      evidence: `BloodHound: TrustDirection=${t.TrustDirection}, TrustType=${t.TrustType}, IsTransitive=${t.IsTransitive}`,
+                      evidence: trustEvidence,
+                      evidence_items: [{
+                        tool: "bloodhound",
+                        output: trustEvidence,
+                        timestamp: new Date().toISOString(),
+                        confidence: 0.9,
+                      }],
                       references: ["https://attack.mitre.org/techniques/T1482/"],
                     })
                     vulnsAdded++

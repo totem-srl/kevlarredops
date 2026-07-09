@@ -19,9 +19,10 @@ export const Parameters = Schema.Struct({
     "engagements",
     "objectives",
     "domain",
+    "changelog",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -42,7 +43,7 @@ function formatHost(ip: string, host: EngagementSchema.Host): string {
   if (host.vulns.length > 0) {
     lines.push(`  Vulns (${host.vulns.length}):`)
     for (const v of host.vulns) {
-      lines.push(`    [${(v.severity ?? "medium").toUpperCase()}] ${v.title} (${v.status ?? "suspected"})${v.service_port ? ` port:${v.service_port}` : ""}`)
+      lines.push(`    [${(v.severity ?? "medium").toUpperCase()}] ${v.title} (${v.status ?? "suspected"})${v.confidence !== undefined ? ` conf:${v.confidence}` : ""}${v.service_port ? ` port:${v.service_port}` : ""}`)
     }
   }
   if (host.access.length > 0) {
@@ -139,8 +140,9 @@ export const StateQueryTool = Tool.define(
               const lines = filtered.map((v) => {
                 const sev = v.vuln.severity ?? "medium"
                 const port = v.vuln.service_port ? `:${v.vuln.service_port}` : ""
+                const conf = v.vuln.confidence !== undefined ? ` conf:${v.vuln.confidence}` : ""
                 const refs = (v.vuln.references ?? []).length > 0 ? ` refs:[${(v.vuln.references ?? []).join(",")}]` : ""
-                return `[${sev.toUpperCase()}] ${v.ip}${port} -- ${v.vuln.title} (${v.vuln.status ?? "suspected"})${refs}${v.vuln.description ? `\n  ${v.vuln.description}` : ""}`
+                return `[${sev.toUpperCase()}] ${v.ip}${port} -- ${v.vuln.title} (${v.vuln.status ?? "suspected"})${conf}${refs}${v.vuln.description ? `\n  ${v.vuln.description}` : ""}`
               })
               const label = params.filter ? `Vulnerabilities [${params.filter}]` : "Vulnerabilities"
               return {
@@ -158,7 +160,8 @@ export const StateQueryTool = Tool.define(
               const lines = creds.map((c) => {
                 const vf = c.valid_for ?? []
                 const validFor = vf.length > 0 ? ` valid_for:[${vf.join(",")}]` : ""
-                return `  [${c.id}] ${c.username ?? ""} (${c.cred_type ?? "password"}) source:${c.source || "unknown"}${validFor}`
+                const conf = c.confidence !== undefined ? ` conf:${c.confidence}` : ""
+                return `  [${c.id}] ${c.username ?? ""} (${c.cred_type ?? "password"}) source:${c.source || "unknown"}${conf}${validFor}`
               })
               return {
                 title: "Credentials",
@@ -303,6 +306,20 @@ export const StateQueryTool = Tool.define(
                 if (parts.length > 0) lines.push(`Password Policy: ${parts.join(", ")}`)
               }
               return { title: "Domain", metadata: { domain: dom.domain_name }, output: lines.join("\n") }
+            }
+
+            case "changelog": {
+              const limit = params.filter ? parseInt(params.filter, 10) || 50 : 50
+              const entries = yield* store.getChangelog(undefined, limit)
+              if (entries.length === 0) {
+                return { title: "Changelog", metadata: { count: 0 }, output: "No changelog entries yet." }
+              }
+              const lines = entries.map((e) => `  [${e.timestamp}] ${e.action} ${e.entity_type}${e.entity_id ? ` (${e.entity_id})` : ""}: ${e.summary}`)
+              return {
+                title: "Changelog",
+                metadata: { count: entries.length },
+                output: `Changelog (last ${entries.length}):\n${lines.join("\n")}`,
+              }
             }
 
             case "full": {

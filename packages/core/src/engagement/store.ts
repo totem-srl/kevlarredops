@@ -10,6 +10,7 @@ import * as path from "node:path"
 
 const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
 const LAST_FILE = ".last"
+const CHANGELOG_FILE = "changelog.json"
 
 function mergeServices(
   existing: readonly EngagementSchema.Service[],
@@ -52,12 +53,17 @@ export interface Interface {
   readonly addObjective: (objective: EngagementSchema.Objective) => Effect.Effect<void>
   readonly updateObjective: (id: string, patch: Record<string, unknown>) => Effect.Effect<void>
   readonly completeObjective: (id: string, evidence?: string) => Effect.Effect<void>
+  readonly getChangelog: (since?: string, limit?: number) => Effect.Effect<EngagementSchema.ChangelogEntry[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
 
 function stateFilePath(name: string): string {
   return path.join(ENGAGEMENTS_DIR, name, "state.json")
+}
+
+function changelogFilePath(name: string): string {
+  return path.join(ENGAGEMENTS_DIR, name, CHANGELOG_FILE)
 }
 
 function lastFilePath(): string {
@@ -71,17 +77,57 @@ const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const stateRef = yield* Ref.make<EngagementSchema.State | undefined>(undefined)
+    const changelogRef = yield* Ref.make<EngagementSchema.ChangelogEntry[]>([])
+
+    const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
+      Effect.gen(function* () {
+        const entry: EngagementSchema.ChangelogEntry = {
+          timestamp: new Date().toISOString(),
+          action,
+          entity_type: entityType,
+          entity_id: entityId,
+          summary,
+        }
+        const current = yield* Ref.get(changelogRef)
+        const updated = [...current, entry]
+        const trimmed = updated.length > EngagementSchema.CHANGELOG_MAX_ENTRIES
+          ? updated.slice(updated.length - EngagementSchema.CHANGELOG_MAX_ENTRIES)
+          : updated
+        yield* Ref.set(changelogRef, trimmed)
+      })
+
+    const persistChangelogEntries = (name: string, entries: EngagementSchema.ChangelogEntry[]) => {
+      try {
+        const filePath = changelogFilePath(name)
+        const dir = path.dirname(filePath)
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        fs.writeFileSync(filePath, JSON.stringify(entries, undefined, 2), { encoding: "utf-8", mode: 0o600 })
+      } catch {
+        // changelog persistence is best-effort
+      }
+    }
+
+    const loadChangelog = (name: string): EngagementSchema.ChangelogEntry[] => {
+      try {
+        const filePath = changelogFilePath(name)
+        if (!fs.existsSync(filePath)) return []
+        const raw = fs.readFileSync(filePath, "utf-8")
+        return JSON.parse(raw) as EngagementSchema.ChangelogEntry[]
+      } catch {
+        return []
+      }
+    }
 
     const persist = (state: EngagementSchema.State) =>
       Effect.sync(() => {
         const filePath = stateFilePath(state.name)
         const dir = path.dirname(filePath)
-        fs.mkdirSync(dir, { recursive: true })
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
         const json = encode(state)
-        fs.writeFileSync(filePath, JSON.stringify(json, undefined, 2), "utf-8")
+        fs.writeFileSync(filePath, JSON.stringify(json, undefined, 2), { encoding: "utf-8", mode: 0o600 })
         const lastPath = lastFilePath()
-        fs.mkdirSync(path.dirname(lastPath), { recursive: true })
-        fs.writeFileSync(lastPath, state.name, "utf-8")
+        fs.mkdirSync(path.dirname(lastPath), { recursive: true, mode: 0o700 })
+        fs.writeFileSync(lastPath, state.name, { encoding: "utf-8", mode: 0o600 })
       })
 
     const readFromDisk = (name: string) =>
@@ -109,6 +155,8 @@ const layer = Layer.effect(
         const updated = { ...state, updated_at: new Date().toISOString() }
         yield* Ref.set(stateRef, updated)
         yield* persist(updated)
+        const entries = yield* Ref.get(changelogRef)
+        persistChangelogEntries(updated.name, entries)
       }),
 
       create: Effect.fn("EngagementStore.create")(function* (name) {
@@ -128,13 +176,18 @@ const layer = Layer.effect(
           notes: [],
         }
         yield* Ref.set(stateRef, state)
+        yield* Ref.set(changelogRef, [])
         yield* persist(state)
+        yield* logChange("create_engagement", "engagement", state.id, `Created engagement "${name}"`)
         return state
       }),
 
       load: Effect.fn("EngagementStore.load")(function* (name) {
         const state = yield* readFromDisk(name)
-        if (state) yield* Ref.set(stateRef, state)
+        if (state) {
+          yield* Ref.set(stateRef, state)
+          yield* Ref.set(changelogRef, loadChangelog(name))
+        }
         return state
       }),
 
@@ -162,6 +215,7 @@ const layer = Layer.effect(
           }
         } else {
           host = { ip, services: [], vulns: [], access: [], notes: [], ...data } as EngagementSchema.Host
+          yield* logChange("add_host", "host", ip, `Host ${ip}${data?.hostname ? ` (${data.hostname})` : ""} added, ${host.services.length} services`)
         }
         const updated = { ...current, hosts: { ...current.hosts, [ip]: host } }
         yield* Ref.set(stateRef, updated)
@@ -173,6 +227,7 @@ const layer = Layer.effect(
         if (!current || !current.hosts[ip]) return false
         const { [ip]: _, ...remainingHosts } = current.hosts
         yield* Ref.set(stateRef, { ...current, hosts: remainingHosts })
+        yield* logChange("delete_host", "host", ip, `Host ${ip} deleted`)
         return true
       }),
 
@@ -191,6 +246,7 @@ const layer = Layer.effect(
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } })
         } else {
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: [...host.vulns, vuln] } } })
+          yield* logChange("add_vuln", "vuln", vuln.id, `[${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title} on ${hostIp}${vuln.confidence !== undefined ? ` conf:${vuln.confidence}` : ""}`)
         }
       }),
 
@@ -204,6 +260,7 @@ const layer = Layer.effect(
         const updatedVulns = [...host.vulns]
         updatedVulns[idx] = { ...updatedVulns[idx]!, ...patch }
         yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } })
+        yield* logChange("update_vuln", "vuln", vulnId, `Vuln ${vulnId} on ${hostIp} updated: ${Object.keys(patch).join(", ")}`)
         return true
       }),
 
@@ -216,16 +273,21 @@ const layer = Layer.effect(
         const filtered = host.vulns.filter((v) => v.id !== vulnId)
         if (filtered.length === before) return false
         yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: filtered } } })
+        yield* logChange("delete_vuln", "vuln", vulnId, `Vuln ${vulnId} deleted from ${hostIp}`)
         return true
       }),
 
       addCredential: Effect.fn("EngagementStore.addCredential")(function* (id, cred) {
         const current = yield* Ref.get(stateRef)
         if (!current) return
+        const isNew = !current.credentials[id]
         yield* Ref.set(stateRef, {
           ...current,
           credentials: { ...current.credentials, [id]: { ...cred, id } },
         })
+        if (isNew) {
+          yield* logChange("add_credential", "credential", id, `Credential ${cred.username ?? id} (${cred.cred_type ?? "password"})${cred.confidence !== undefined ? ` conf:${cred.confidence}` : ""}`)
+        }
       }),
 
       deleteCredential: Effect.fn("EngagementStore.deleteCredential")(function* (id) {
@@ -233,6 +295,7 @@ const layer = Layer.effect(
         if (!current || !current.credentials[id]) return false
         const { [id]: _, ...remaining } = current.credentials
         yield* Ref.set(stateRef, { ...current, credentials: remaining })
+        yield* logChange("delete_credential", "credential", id, `Credential ${id} deleted`)
         return true
       }),
 
@@ -251,19 +314,23 @@ const layer = Layer.effect(
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: updatedAccess } } })
         } else {
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: [...host.access, access] } } })
+          yield* logChange("add_access", "access", hostIp, `${access.access_type} as ${access.username} (${access.level ?? "user"}) on ${hostIp}${access.confidence !== undefined ? ` conf:${access.confidence}` : ""}`)
         }
       }),
 
       setPhase: Effect.fn("EngagementStore.setPhase")(function* (phase) {
         const current = yield* Ref.get(stateRef)
         if (!current) return
+        const oldPhase = current.current_phase
         yield* Ref.set(stateRef, { ...current, current_phase: phase })
+        yield* logChange("set_phase", "phase", phase, `Phase: ${oldPhase} -> ${phase}`)
       }),
 
       setMode: Effect.fn("EngagementStore.setMode")(function* (mode) {
         const current = yield* Ref.get(stateRef)
         if (!current) return
         yield* Ref.set(stateRef, { ...current, mode })
+        yield* logChange("set_mode", "mode", mode, `Mode: ${mode}`)
       }),
 
       updateScope: Effect.fn("EngagementStore.updateScope")(function* (scope) {
@@ -326,6 +393,18 @@ const layer = Layer.effect(
             [id]: { ...existing, status: "completed" as const, ...(evidence !== undefined ? { evidence } : {}) },
           },
         })
+        yield* logChange("complete_objective", "objective", id, `Objective "${existing.title}" completed`)
+      }),
+
+      getChangelog: Effect.fn("EngagementStore.getChangelog")(function* (since, limit) {
+        let entries = yield* Ref.get(changelogRef)
+        if (since) {
+          entries = entries.filter((e) => e.timestamp > since)
+        }
+        if (limit && limit > 0) {
+          entries = entries.slice(-limit)
+        }
+        return entries
       }),
     })
   }),

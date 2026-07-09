@@ -325,13 +325,21 @@ export const GobusterParseTool = Tool.define(
           if (shouldUpdate && findings.length > 0) {
             const state = yield* store.get()
             for (const finding of findings) {
+              const evidenceStr = `gobuster/feroxbuster: ${finding.path} (${finding.status})`
               yield* store.addVuln(params.target_host, {
                 id: `web-${finding.category}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
                 title: finding.title,
                 severity: finding.severity,
                 status: "suspected",
+                confidence: 0.4,
                 description: `${finding.path} returned HTTP ${finding.status}`,
-                evidence: `gobuster/feroxbuster: ${finding.path} (${finding.status})`,
+                evidence: evidenceStr,
+                evidence_items: [{
+                  tool: "gobuster",
+                  output: evidenceStr,
+                  timestamp: new Date().toISOString(),
+                  confidence: 0.4,
+                }],
                 service_port: targetPort,
               })
 

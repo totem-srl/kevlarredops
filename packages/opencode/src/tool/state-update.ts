@@ -178,8 +178,10 @@ export const StateUpdateTool = Tool.define(
                 title,
                 severity: d.severity || "medium",
                 status: d.status || "suspected",
+                confidence: d.confidence as number | undefined,
                 description: d.description || "",
                 evidence: d.evidence || "",
+                evidence_items: d.evidence_items as EngagementSchema.EvidenceItem[] | undefined,
                 service_port: d.service_port,
                 references: d.references || [],
                 mitre_attack_id: d.mitre_attack_id,
@@ -213,7 +215,9 @@ export const StateUpdateTool = Tool.define(
               const patch: Record<string, unknown> = {}
               if (d.status !== undefined) patch.status = d.status
               if (d.severity !== undefined) patch.severity = d.severity
+              if (d.confidence !== undefined) patch.confidence = d.confidence
               if (d.evidence !== undefined) patch.evidence = d.evidence
+              if (d.evidence_items !== undefined) patch.evidence_items = d.evidence_items
               if (d.description !== undefined) patch.description = d.description
               if (d.title !== undefined) patch.title = d.title
               const ok = yield* store.updateVuln(hostIp, vulnId, patch as Partial<{ -readonly [K in keyof EngagementSchema.Vulnerability]: EngagementSchema.Vulnerability[K] }>)
@@ -265,6 +269,11 @@ export const StateUpdateTool = Tool.define(
                 value: d.value || "",
                 source: d.source || "",
                 valid_for: d.valid_for || [],
+                confidence: d.confidence as number | undefined,
+                domain: d.domain as string | undefined,
+                ticket_type: d.ticket_type as string | undefined,
+                service_principal: d.service_principal as string | undefined,
+                ticket_expiry: d.ticket_expiry as string | undefined,
               } as Omit<EngagementSchema.Credential, "id">
               yield* store.addCredential(id, cred)
               const updated = yield* store.get()
@@ -323,6 +332,7 @@ export const StateUpdateTool = Tool.define(
                 access_type: accessType,
                 username,
                 level: d.level || "user",
+                confidence: d.confidence as number | undefined,
                 credential_id: d.credential_id,
                 details: d.details || "",
               } as EngagementSchema.Access

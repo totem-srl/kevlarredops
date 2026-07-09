@@ -49,14 +49,25 @@ export const Service = Schema.Struct({
 }).annotate({ identifier: "Engagement.Service" })
 export type Service = typeof Service.Type
 
+export const EvidenceItem = Schema.Struct({
+  tool: Schema.String,
+  command: Schema.optional(Schema.String),
+  output: Schema.String,
+  timestamp: Schema.optional(Schema.String),
+  confidence: Schema.optional(Schema.Number),
+}).annotate({ identifier: "Engagement.EvidenceItem" })
+export type EvidenceItem = typeof EvidenceItem.Type
+
 export const Vulnerability = Schema.Struct({
   id: Schema.optional(Schema.String),
   title: Schema.String,
   service_port: Schema.optional(Schema.Number),
   severity: Schema.optional(Severity),
   status: Schema.optional(VulnStatus),
+  confidence: Schema.optional(Schema.Number),
   description: Schema.optional(Schema.String),
   evidence: Schema.optional(Schema.String),
+  evidence_items: Schema.optional(Schema.Array(EvidenceItem)),
   references: Schema.optional(Schema.Array(Schema.String)),
   mitre_attack_id: Schema.optional(Schema.String),
 }).annotate({ identifier: "Engagement.Vulnerability" })
@@ -69,6 +80,7 @@ export const Credential = Schema.Struct({
   value: Schema.optional(Schema.String),
   source: Schema.optional(Schema.String),
   valid_for: Schema.optional(Schema.Array(Schema.String)),
+  confidence: Schema.optional(Schema.Number),
   domain: Schema.optional(Schema.String),
   ticket_type: Schema.optional(Schema.String),
   service_principal: Schema.optional(Schema.String),
@@ -80,6 +92,7 @@ export const Access = Schema.Struct({
   access_type: Schema.String,
   username: Schema.String,
   level: Schema.optional(AccessLevel),
+  confidence: Schema.optional(Schema.Number),
   credential_id: Schema.optional(Schema.String),
   details: Schema.optional(Schema.String),
 }).annotate({ identifier: "Engagement.Access" })
@@ -197,6 +210,17 @@ export const State = Schema.Struct({
 }).annotate({ identifier: "Engagement.State" })
 export type State = typeof State.Type
 
+export const ChangelogEntry = Schema.Struct({
+  timestamp: Schema.String,
+  action: Schema.String,
+  entity_type: Schema.String,
+  entity_id: Schema.optional(Schema.String),
+  summary: Schema.String,
+}).annotate({ identifier: "Engagement.ChangelogEntry" })
+export type ChangelogEntry = typeof ChangelogEntry.Type
+
+export const CHANGELOG_MAX_ENTRIES = 500
+
 export function summary(state: State) {
   const hostCount = Object.keys(state.hosts).length
   const compromised = Object.values(state.hosts).filter((h) => h.access.length > 0).length
@@ -251,12 +275,14 @@ export function toCompactContext(state: State, maxHosts = 20): string {
         title: v.title,
         severity: v.severity,
         status: v.status,
+        ...(v.confidence !== undefined ? { conf: v.confidence } : {}),
       }))
     if (host.access.length > 0)
       h.access = host.access.map((a) => ({
         type: a.access_type,
         user: a.username,
         level: a.level,
+        ...(a.confidence !== undefined ? { conf: a.confidence } : {}),
       }))
     ;(data.hosts as Record<string, unknown>)[ip] = h
   }

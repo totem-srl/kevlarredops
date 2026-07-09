@@ -12,6 +12,7 @@ import { AppProcess } from "../process"
 import { PermissionV2 } from "../permission"
 import { PositiveInt } from "../schema"
 import { ToolRegistry } from "./registry"
+import { CommandRisk } from "./command-risk"
 import { Tool } from "./tool"
 import { Tools } from "./tools"
 
@@ -135,10 +136,22 @@ const layer = Layer.effectDiscard(
                   agent: context.agent,
                   source,
                 })
+              const risk = CommandRisk.classify(input.command)
+              if (risk.tier === "destructive") {
+                return {
+                  output: CommandRisk.tierWarning(risk)!,
+                  exit: 1,
+                  truncated: false,
+                }
+              }
+
               const warnings = (yield* externalCommandDirectories(fs, input.command, target.canonical)).map(
                 (directory) =>
                   `Command argument references external directory ${path.join(directory, "*").replaceAll("\\", "/")}. Bash runs with host-user filesystem, process, and network authority; this scan is advisory only.`,
               )
+              const riskWarning = CommandRisk.tierWarning(risk)
+              if (riskWarning) warnings.push(riskWarning)
+
               yield* permission.assert({
                 action: name,
                 resources: [input.command],

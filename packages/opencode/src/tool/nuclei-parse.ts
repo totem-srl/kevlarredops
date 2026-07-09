@@ -200,13 +200,21 @@ export const NucleiParseTool = Tool.define(
                 .filter(Boolean)
                 .join(" | ")
 
+              const conf = f.severity === "info" ? 0.5 : 0.8
               yield* store.addVuln(f.ip, {
                 id: f.vulnId,
                 title: f.title,
                 severity: f.severity as any,
                 status: "confirmed",
+                confidence: conf,
                 description: `Nuclei ${f.scanType} scan finding. Tags: ${f.tags.join(", ") || "none"}`,
                 evidence,
+                evidence_items: [{
+                  tool: "nuclei",
+                  output: evidence,
+                  timestamp: new Date().toISOString(),
+                  confidence: conf,
+                }],
                 service_port: f.port || undefined,
                 references: f.references,
               })

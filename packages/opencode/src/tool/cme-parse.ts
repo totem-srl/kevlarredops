@@ -262,13 +262,21 @@ export const CmeParseTool = Tool.define(
               }
 
               if (h.signing === false && state) {
+                const smbEvidence = `CrackMapExec output: signing:False on ${h.ip}`
                 yield* store.addVuln(h.ip, {
                   id: `smb-signing-disabled-${h.ip}`,
                   title: "SMB Signing Disabled",
                   severity: "medium",
                   status: "confirmed",
+                  confidence: 0.95,
                   description: "SMB signing is not enforced, enabling NTLM relay attacks.",
-                  evidence: `CrackMapExec output: signing:False on ${h.ip}`,
+                  evidence: smbEvidence,
+                  evidence_items: [{
+                    tool: "crackmapexec",
+                    output: smbEvidence,
+                    timestamp: new Date().toISOString(),
+                    confidence: 0.95,
+                  }],
                   service_port: 445,
                   references: [],
                 })
@@ -294,6 +302,8 @@ export const CmeParseTool = Tool.define(
                 value: c.secret,
                 source: `cme ${c.protocol} ${c.ip}:${c.port}`,
                 valid_for: [`${c.ip}:${c.port}/${c.protocol}`],
+                confidence: 0.95,
+                domain: c.domain || undefined,
               })
 
               if (state) {
@@ -312,6 +322,7 @@ export const CmeParseTool = Tool.define(
                   access_type: c.protocol.toLowerCase(),
                   username: `${domain}${c.username}`,
                   level,
+                  confidence: 0.95,
                   credential_id: id,
                   details: c.isAdmin ? "Pwn3d! — admin access confirmed" : "Valid credentials",
                 })
