@@ -1,13 +1,13 @@
 import { Effect } from "effect"
 import { effectCmd } from "../effect-cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@pentestcode/core/flag/flag"
 
 export const ServeCommand = effectCmd({
   command: "serve",
   builder: (yargs) => withNetworkOptions(yargs),
   describe: "starts a headless pentestcode server",
-  // Server loads instances per-request via x-opencode-directory header — no
+  // Server loads instances per-request via x-pentestcode-directory header — no
   // need for an ambient project InstanceContext at startup.
   instance: false,
   handler: Effect.fn("Cli.serve")(function* (args) {
@@ -17,7 +17,7 @@ export const ServeCommand = effectCmd({
     }
     const opts = yield* resolveNetworkOptions(args)
     const server = yield* Effect.promise(() => Server.listen(opts))
-    console.log(`opencode server listening on http://${server.hostname}:${server.port}`)
+    console.log(`pentestcode server listening on http://${server.hostname}:${server.port}`)
 
     yield* Effect.never
   }),

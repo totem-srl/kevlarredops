@@ -1,27 +1,27 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import { and, eq, sql } from "drizzle-orm"
-import { Database } from "@opencode-ai/core/database/database"
-import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
-import { ProjectDirectories } from "@opencode-ai/core/project/directories"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Database } from "@pentestcode/core/database/database"
+import { ProjectDirectoryTable, ProjectTable } from "@pentestcode/core/project/sql"
+import { ProjectDirectories } from "@pentestcode/core/project/directories"
+import { SessionTable } from "@pentestcode/core/session/sql"
+import { WorkspaceTable } from "@pentestcode/core/control-plane/workspace.sql"
+import { Flag } from "@pentestcode/core/flag/flag"
 import { GlobalBus } from "@/bus/global"
-import { which } from "@opencode-ai/core/util/which"
+import { which } from "@pentestcode/core/util/which"
 import { Command } from "@/command"
 import { InstanceState } from "@/effect/instance-state"
 import { Effect, Layer, Scope, Context, Stream, Types, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-import { AppProcess } from "@opencode-ai/core/process"
-import { ProjectV2 } from "@opencode-ai/core/project"
-import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { AbsolutePath } from "@opencode-ai/core/schema"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { FSUtil } from "@pentestcode/core/fs-util"
+import { AppProcess } from "@pentestcode/core/process"
+import { ProjectV2 } from "@pentestcode/core/project"
+import { CrossSpawnSpawner } from "@pentestcode/core/cross-spawn-spawner"
+import { AbsolutePath } from "@pentestcode/core/schema"
+import { serviceUse } from "@pentestcode/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { EventV2 } from "@opencode-ai/core/event"
-import { Project } from "@opencode-ai/schema/project"
+import { EventV2 } from "@pentestcode/core/event"
+import { Project } from "@pentestcode/schema/project"
 
 export const Info = Project.Info
 export type Info = Types.DeepMutable<Schema.Schema.Type<typeof Info>>
@@ -99,7 +99,7 @@ export interface Interface {
   readonly removeSandbox: (id: ProjectV2.ID, directory: string) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Project") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/Project") {}
 
 type GitResult = { code: number; text: string; stderr: string }
 

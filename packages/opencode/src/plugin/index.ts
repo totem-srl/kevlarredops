@@ -1,17 +1,17 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import type {
   Hooks,
   PluginInput,
   Plugin as PluginInstance,
   PluginModule,
   WorkspaceAdapter as PluginWorkspaceAdapter,
-} from "@opencode-ai/plugin"
+} from "@pentestcode/plugin"
 import { Config } from "@/config/config"
-import { createOpencodeClient } from "@opencode-ai/sdk"
+import { createOpencodeClient } from "@pentestcode/sdk"
 import { ServerAuth } from "@/server/auth"
 import { CodexAuthPlugin } from "./openai/codex"
 import { Session } from "@/session/session"
-import { NamedError } from "@opencode-ai/core/util/error"
+import { NamedError } from "@pentestcode/core/util/error"
 import { CopilotAuthPlugin } from "./github-copilot/copilot"
 import { gitlabAuthPlugin as GitlabAuthPlugin } from "opencode-gitlab-auth"
 import { PoeAuthPlugin } from "opencode-poe-auth"
@@ -30,7 +30,7 @@ import { registerAdapter } from "@/control-plane/adapters"
 import type { WorkspaceAdapter } from "@/control-plane/types"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { InstallationChannel } from "@opencode-ai/core/installation/version"
+import { InstallationChannel } from "@pentestcode/core/installation/version"
 
 type State = {
   hooks: Hooks[]
@@ -55,7 +55,7 @@ export interface Interface {
   readonly init: () => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Plugin") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/Plugin") {}
 
 export function experimentalWebSocketsEnabled(input: { enabled: boolean; channel?: string }) {
   return input.enabled || ["local", "dev", "beta"].includes(input.channel ?? InstallationChannel)
@@ -70,8 +70,8 @@ function internalPlugins(flags: RuntimeFlags.Info): PluginInstance[] {
         experimentalWebSockets: experimentalWebSocketsEnabled({ enabled: flags.experimentalWebSockets }),
       }),
     CopilotAuthPlugin,
-    GitlabAuthPlugin,
-    PoeAuthPlugin,
+    GitlabAuthPlugin as unknown as PluginInstance,
+    PoeAuthPlugin as unknown as PluginInstance,
     CloudflareWorkersAuthPlugin,
     CloudflareAIGatewayAuthPlugin,
     AzureAuthPlugin,

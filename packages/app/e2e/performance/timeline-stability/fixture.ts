@@ -1,7 +1,7 @@
-import { base64Encode } from "@opencode-ai/core/util/encode"
-import { Event } from "@opencode-ai/schema/event"
-import { SessionStatusEvent } from "@opencode-ai/schema/session-status-event"
-import { SessionV1 } from "@opencode-ai/schema/session-v1"
+import { base64Encode } from "@pentestcode/core/util/encode"
+import { Event } from "@pentestcode/schema/event"
+import { SessionStatusEvent } from "@pentestcode/schema/session-status-event"
+import { SessionV1 } from "@pentestcode/schema/session-v1"
 import type {
   AssistantMessage,
   GlobalEvent,
@@ -12,7 +12,7 @@ import type {
   ToolPart,
   ToolState,
   UserMessage,
-} from "@opencode-ai/sdk/v2/client"
+} from "@pentestcode/sdk/v2/client"
 import { expect, type Page } from "@playwright/test"
 import { Schema } from "effect"
 import { mockOpenCodeServer } from "../../utils/mock-server"

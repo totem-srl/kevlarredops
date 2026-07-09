@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@opencode-ai/sdk",
+  "name": "@pentestcode/sdk",
   "version": "1.17.15",
   "type": "module",
   "license": "MIT",

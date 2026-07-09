@@ -6,9 +6,9 @@ import { define } from "./internal"
 import { Effect } from "effect"
 import { AbsolutePath } from "../schema"
 import { SkillV2 } from "../skill"
-import customizeOpencodeContent from "./skill/customize-pentestcode.md" with { type: "text" }
+import customizePentestcodeContent from "./skill/customize-pentestcode.md" with { type: "text" }
 
-export const CustomizeOpencodeContent = customizeOpencodeContent
+export const CustomizePentestcodeContent = customizePentestcodeContent
 
 export const Plugin = define({
   id: "skill",
@@ -22,7 +22,7 @@ export const Plugin = define({
             description:
               "Use ONLY when the user is editing or creating pentestcode's own configuration: pentestcode.json, pentestcode.jsonc, files under .pentestcode/, or files under ~/.config/pentestcode/. Also use when creating or fixing pentestcode agents, subagents, commands, skills, plugins, MCP servers, or permission rules. Do not use for the user's own application code, or for any project that is not configuring pentestcode itself.",
             location: AbsolutePath.make("/builtin/customize-pentestcode.md"),
-            content: CustomizeOpencodeContent,
+            content: CustomizePentestcodeContent,
           }),
         }),
       )

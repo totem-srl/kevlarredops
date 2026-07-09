@@ -1,7 +1,7 @@
 // @ts-nocheck
 import * as mod from "./markdown"
-import { create } from "@opencode-ai/ui/storybook/scaffold"
-import { markdown } from "@opencode-ai/ui/storybook/fixtures"
+import { create } from "@pentestcode/ui/storybook/scaffold"
+import { markdown } from "@pentestcode/ui/storybook/fixtures"
 
 const docs = `### Overview
 Render sanitized Markdown with code blocks, inline code, and safe links.

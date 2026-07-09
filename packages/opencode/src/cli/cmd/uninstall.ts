@@ -2,7 +2,7 @@ import type { Argv } from "yargs"
 import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { Installation } from "../../installation"
-import { Global } from "@opencode-ai/core/global"
+import { Global } from "@pentestcode/core/global"
 import fs from "fs/promises"
 import path from "path"
 import os from "os"
@@ -129,13 +129,13 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string> = {
-      npm: "npm uninstall -g opencode-ai",
-      pnpm: "pnpm uninstall -g opencode-ai",
-      bun: "bun remove -g opencode-ai",
-      yarn: "yarn global remove opencode-ai",
-      brew: "brew uninstall opencode",
-      choco: "choco uninstall opencode",
-      scoop: "scoop uninstall opencode",
+      npm: "npm uninstall -g pentestcode-ai",
+      pnpm: "pnpm uninstall -g pentestcode-ai",
+      bun: "bun remove -g pentestcode-ai",
+      yarn: "yarn global remove pentestcode-ai",
+      brew: "brew uninstall pentestcode",
+      choco: "choco uninstall pentestcode",
+      scoop: "scoop uninstall pentestcode",
     }
     prompts.log.info(`  ✓ Package: ${cmds[method] || method}`)
   }
@@ -180,19 +180,19 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "opencode-ai"],
-      pnpm: ["pnpm", "uninstall", "-g", "opencode-ai"],
-      bun: ["bun", "remove", "-g", "opencode-ai"],
-      yarn: ["yarn", "global", "remove", "opencode-ai"],
-      brew: ["brew", "uninstall", "opencode"],
-      choco: ["choco", "uninstall", "opencode"],
-      scoop: ["scoop", "uninstall", "opencode"],
+      npm: ["npm", "uninstall", "-g", "pentestcode-ai"],
+      pnpm: ["pnpm", "uninstall", "-g", "pentestcode-ai"],
+      bun: ["bun", "remove", "-g", "pentestcode-ai"],
+      yarn: ["yarn", "global", "remove", "pentestcode-ai"],
+      brew: ["brew", "uninstall", "pentestcode"],
+      choco: ["choco", "uninstall", "pentestcode"],
+      scoop: ["scoop", "uninstall", "pentestcode"],
     }
 
     const cmd = cmds[method]
     if (cmd) {
       spinner.start(`Running ${cmd.join(" ")}...`)
-      const result = await Process.run(method === "choco" ? ["choco", "uninstall", "opencode", "-y", "-r"] : cmd, {
+      const result = await Process.run(method === "choco" ? ["choco", "uninstall", "pentestcode", "-y", "-r"] : cmd, {
         nothrow: true,
       })
       if (result.code !== 0) {

@@ -1,6 +1,6 @@
 import { cmd } from "./cmd"
 import { UI } from "@/cli/ui"
-import { errorMessage } from "@opencode-ai/tui/util/error"
+import { errorMessage } from "@pentestcode/tui/util/error"
 import { validateSession } from "../tui/validate-session"
 import { ServerAuth } from "@/server/auth"
 
@@ -40,7 +40,7 @@ export const AttachCommand = cmd({
       .option("username", {
         alias: ["u"],
         type: "string",
-        describe: "basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'opencode')",
+        describe: "basic auth username (defaults to OPENCODE_SERVER_USERNAME or 'pentestcode')",
       })
       .option("mini", {
         type: "boolean",

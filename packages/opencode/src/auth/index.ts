@@ -1,11 +1,11 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import path from "path"
 import { Effect, Layer, Record, Result, Schema, Context } from "effect"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
-import { Global } from "@opencode-ai/core/global"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { NonNegativeInt } from "@pentestcode/core/schema"
+import { Global } from "@pentestcode/core/global"
+import { FSUtil } from "@pentestcode/core/fs-util"
 
-export const OAUTH_DUMMY_KEY = "opencode-oauth-dummy-key"
+export const OAUTH_DUMMY_KEY = "pentestcode-oauth-dummy-key"
 
 const file = path.join(Global.Path.data, "auth.json")
 
@@ -47,7 +47,7 @@ export interface Interface {
   readonly remove: (key: string) => Effect.Effect<void, AuthError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Auth") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/Auth") {}
 
 const layer = Layer.effect(
   Service,

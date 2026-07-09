@@ -1,6 +1,6 @@
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionV1 } from "@pentestcode/core/v1/permission"
 import { Permission } from "@/permission"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@pentestcode/core/v1/session"
 
 import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
@@ -23,8 +23,8 @@ import {
 import { ApiNotFoundError, PermissionNotFoundError, SessionBusyError } from "../errors"
 import { described } from "./metadata"
 import { QueryBoolean } from "./query"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@pentestcode/core/provider"
+import { ModelV2 } from "@pentestcode/core/model"
 
 const root = "/session"
 export const ListQuery = Schema.Struct({
@@ -455,7 +455,7 @@ export const SessionApi = HttpApi.make("session")
   )
   .annotateMerge(
     OpenApi.annotations({
-      title: "opencode experimental HttpApi",
+      title: "pentestcode experimental HttpApi",
       version: "0.0.1",
       description: "Experimental HttpApi surface for selected instance routes.",
     }),

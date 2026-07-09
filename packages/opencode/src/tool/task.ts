@@ -1,7 +1,7 @@
 import * as Tool from "./tool"
 import DESCRIPTION from "./task.txt"
 import { ToolJsonSchema } from "./json-schema"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@pentestcode/core/v1/session"
 import { BackgroundJob } from "@/background/job"
 import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
@@ -13,8 +13,8 @@ import { Config } from "@/config/config"
 import { Effect, Exit, Schema, Scope } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { Database } from "@opencode-ai/core/database/database"
-import { EngagementStore } from "@opencode-ai/core/engagement/store"
+import { Database } from "@pentestcode/core/database/database"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>

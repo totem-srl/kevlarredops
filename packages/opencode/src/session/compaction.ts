@@ -1,6 +1,6 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
+import { SessionV1 } from "@pentestcode/core/v1/session"
+import { ConfigV1 } from "@pentestcode/core/v1/config/config"
 import { Session } from "./session"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Provider } from "@/provider/provider"
@@ -15,13 +15,13 @@ import { NotFoundError } from "@/storage/storage"
 import { Effect, Layer, Context } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { isOverflow as overflow, usable } from "./overflow"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { serviceUse } from "@pentestcode/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { buildPrompt } from "@opencode-ai/core/session/compaction"
-import { SessionCompactionEvent } from "@opencode-ai/schema/session-compaction-event"
+import { ProviderV2 } from "@pentestcode/core/provider"
+import { ModelV2 } from "@pentestcode/core/model"
+import { buildPrompt } from "@pentestcode/core/session/compaction"
+import { SessionCompactionEvent } from "@pentestcode/schema/session-compaction-event"
 
 export const Event = SessionCompactionEvent
 
@@ -149,7 +149,7 @@ export interface Interface {
   }) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/SessionCompaction") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/SessionCompaction") {}
 
 export const use = serviceUse(Service)
 

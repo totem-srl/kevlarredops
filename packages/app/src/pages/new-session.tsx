@@ -2,7 +2,7 @@ import { Show, createEffect, createMemo, createResource, untrack } from "solid-j
 import { createStore } from "solid-js/store"
 import { Portal } from "solid-js/web"
 import { useSearchParams } from "@solidjs/router"
-import { Tooltip } from "@opencode-ai/ui/tooltip"
+import { Tooltip } from "@pentestcode/ui/tooltip"
 import { NewSessionDesignView } from "@/components/session"
 import { PromptInput } from "@/components/prompt-input"
 import { StatusPopoverV2 } from "@/components/status-popover"

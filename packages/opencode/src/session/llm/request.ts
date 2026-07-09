@@ -1,6 +1,6 @@
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { PermissionV1 } from "@pentestcode/core/v1/permission"
 import type { Auth } from "@/auth"
-import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { SessionV1 } from "@pentestcode/core/v1/session"
 import type { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceState } from "@/effect/instance-state"
 import { Permission } from "@/permission"
@@ -9,13 +9,13 @@ import type { MessageV2 } from "../message-v2"
 import type { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { SystemPrompt } from "../system"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationVersion } from "@pentestcode/core/installation/version"
 import { Effect, Record } from "effect"
 import { jsonSchema, tool as aiTool, type ModelMessage, type Tool } from "ai"
 import type { Plugin } from "@/plugin"
 import { mergeDeep } from "remeda"
 
-const USER_AGENT = `opencode/${InstallationVersion}`
+const USER_AGENT = `pentestcode/${InstallationVersion}`
 
 type PrepareInput = {
   readonly user: SessionV1.User
@@ -187,10 +187,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     headers: {
       ...(input.model.providerID.startsWith("opencode")
         ? {
-            ...(opencodeProjectID ? { "x-opencode-project": opencodeProjectID } : {}),
-            "x-opencode-session": input.sessionID,
-            "x-opencode-request": input.user.id,
-            "x-opencode-client": input.flags.client,
+            ...(opencodeProjectID ? { "x-pentestcode-project": opencodeProjectID } : {}),
+            "x-pentestcode-session": input.sessionID,
+            "x-pentestcode-request": input.user.id,
+            "x-pentestcode-client": input.flags.client,
             "User-Agent": USER_AGENT,
           }
         : {

@@ -1,4 +1,4 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
@@ -18,7 +18,7 @@ import PROMPT_PHASE from "./template/pentest-phase.txt"
 import PROMPT_MODE from "./template/pentest-mode.txt"
 import PROMPT_REPORT from "./template/pentest-report.txt"
 import PROMPT_OBJECTIVES from "./template/pentest-objectives.txt"
-import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
+import { LegacyEvent } from "@pentestcode/schema/legacy-event"
 
 type State = {
   commands: Record<string, Info>
@@ -71,7 +71,7 @@ export interface Interface {
   readonly list: () => Effect.Effect<Info[]>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/Command") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/Command") {}
 
 const layer = Layer.effect(
   Service,

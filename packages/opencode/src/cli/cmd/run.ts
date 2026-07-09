@@ -1,14 +1,14 @@
-import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
-import { FSUtil } from "@opencode-ai/core/fs-util"
-// CLI entry point for `opencode run` and `opencode --mini`.
+import type { PermissionV1 } from "@pentestcode/core/v1/permission"
+import { FSUtil } from "@pentestcode/core/fs-util"
+// CLI entry point for `pentestcode run` and `pentestcode --mini`.
 //
 // Handles three modes:
 //   1. Non-interactive (default): sends a single prompt, streams events to
 //      stdout, and exits when the session goes idle.
-//   2. Interactive local (`opencode --mini`): boots the split-footer direct mode
+//   2. Interactive local (`pentestcode --mini`): boots the split-footer direct mode
 //      with an in-process server (no external HTTP).
-//   3. Interactive attach (`opencode --mini --attach`): connects to a running
-//      opencode server and runs interactive mode against it.
+//   3. Interactive attach (`pentestcode --mini --attach`): connects to a running
+//      pentestcode server and runs interactive mode against it.
 //
 // Also supports `--command` for slash-command execution, `--format json` for
 // raw event streaming, `--continue` / `--session` for session resumption,
@@ -22,7 +22,7 @@ import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { EOL } from "os"
 import { Filesystem } from "@/util/filesystem"
-import { createOpencodeClient, type OpencodeClient, type ToolPart } from "@opencode-ai/sdk/v2"
+import { createOpencodeClient, type OpencodeClient, type ToolPart } from "@pentestcode/sdk/v2"
 import { FormatError, FormatUnknownError } from "../error"
 import { INTERACTIVE_INPUT_ERROR, resolveInteractiveStdin } from "./run/runtime.stdin"
 

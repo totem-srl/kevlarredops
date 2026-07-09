@@ -1,4 +1,4 @@
-// Per-tool display rules shared across `opencode run` output paths.
+// Per-tool display rules shared across `pentestcode run` output paths.
 //
 // Each known tool (bash, edit, write, task, etc.) has a ToolRule that controls
 // five display hooks:
@@ -15,7 +15,7 @@
 import os from "os"
 import path from "path"
 import stripAnsi from "strip-ansi"
-import type { ToolPart } from "@opencode-ai/sdk/v2"
+import type { ToolPart } from "@pentestcode/sdk/v2"
 import type * as Tool from "@/tool/tool"
 import type { ShellTool as BashTool } from "@/tool/shell"
 import type { EditTool } from "@/tool/edit"

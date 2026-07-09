@@ -2,9 +2,9 @@ import path from "path"
 import { type ParseError as JsoncParseError, applyEdits, modify, parse as parseJsonc } from "jsonc-parser"
 import { unique } from "remeda"
 import { Option, Schema } from "effect"
-import { TuiConfig } from "@opencode-ai/tui/config"
-import { Flag } from "@opencode-ai/core/flag/flag"
-import { Global } from "@opencode-ai/core/global"
+import { TuiConfig } from "@pentestcode/tui/config"
+import { Flag } from "@pentestcode/core/flag/flag"
+import { Global } from "@pentestcode/core/global"
 import { Filesystem } from "@/util/filesystem"
 import * as ConfigPaths from "@/config/paths"
 
@@ -22,13 +22,13 @@ interface MigrateInput {
 }
 
 /**
- * Migrates tui-specific keys (theme, keybinds, tui) from opencode.json files
+ * Migrates tui-specific keys (theme, keybinds, tui) from pentestcode.json (or legacy opencode.json) files
  * into dedicated tui.json files. Migration is performed per-directory and
  * skips only locations where a tui.json already exists.
  */
 export async function migrateTuiConfig(input: MigrateInput) {
-  const opencode = await opencodeFiles(input)
-  for (const file of opencode) {
+  const configFiles = await opencodeFiles(input)
+  for (const file of configFiles) {
     const source = await Filesystem.readText(file).catch(() => undefined)
     if (!source) continue
     const errors: JsoncParseError[] = []
@@ -114,10 +114,12 @@ async function backupAndStripLegacy(file: string, source: string) {
 
 async function opencodeFiles(input: { directories: string[]; cwd: string }) {
   const files = [
+    ...ConfigPaths.fileInDirectory(Global.Path.config, "pentestcode"),
     ...ConfigPaths.fileInDirectory(Global.Path.config, "opencode"),
-    ...(await Filesystem.findUp(["opencode.json", "opencode.jsonc"], input.cwd, undefined, { rootFirst: true })),
+    ...(await Filesystem.findUp(["pentestcode.json", "pentestcode.jsonc", "opencode.json", "opencode.jsonc"], input.cwd, undefined, { rootFirst: true })),
   ]
   for (const dir of unique(input.directories)) {
+    files.push(...ConfigPaths.fileInDirectory(dir, "pentestcode"))
     files.push(...ConfigPaths.fileInDirectory(dir, "opencode"))
   }
   if (Flag.OPENCODE_CONFIG) files.push(Flag.OPENCODE_CONFIG)

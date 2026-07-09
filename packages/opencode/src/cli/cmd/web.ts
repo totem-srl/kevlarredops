@@ -2,7 +2,7 @@ import { Effect } from "effect"
 import { UI } from "../ui"
 import { effectCmd } from "../effect-cmd"
 import { withNetworkOptions, resolveNetworkOptions } from "../network"
-import { Flag } from "@opencode-ai/core/flag/flag"
+import { Flag } from "@pentestcode/core/flag/flag"
 import open from "open"
 import { networkInterfaces } from "os"
 
@@ -32,7 +32,7 @@ export const WebCommand = effectCmd({
   command: "web",
   builder: (yargs) => withNetworkOptions(yargs),
   describe: "start pentestcode server and open web interface",
-  // Server loads instances per-request via x-opencode-directory header — no
+  // Server loads instances per-request via x-pentestcode-directory header — no
   // ambient project InstanceContext needed at startup.
   instance: false,
   handler: Effect.fn("Cli.web")(function* (args) {

@@ -10,4 +10,4 @@ export interface Interface {
 }
 
 /** Narrow registration-only Location capability. */
-export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Tools") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/v2/Tools") {}

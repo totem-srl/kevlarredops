@@ -1,5 +1,5 @@
-import { PermissionV1 } from "@opencode-ai/core/v1/permission"
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import { PermissionV1 } from "@pentestcode/core/v1/permission"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import { describe, test, expect } from "bun:test"
 import { Effect } from "effect"
 import { Permission } from "../src/permission"

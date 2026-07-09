@@ -1,7 +1,7 @@
-import type { Hooks, PluginInput } from "@opencode-ai/plugin"
-import type { Model } from "@opencode-ai/sdk/v2"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { OauthCallbackPage } from "@opencode-ai/core/oauth/page"
+import type { Hooks, PluginInput } from "@pentestcode/plugin"
+import type { Model } from "@pentestcode/sdk/v2"
+import { InstallationVersion } from "@pentestcode/core/installation/version"
+import { OauthCallbackPage } from "@pentestcode/core/oauth/page"
 import { createServer } from "http"
 import open from "open"
 
@@ -171,7 +171,7 @@ async function listRouters(
     headers: {
       Authorization: `Bearer ${bearer}`,
       Accept: "application/json",
-      "User-Agent": `opencode/${InstallationVersion}`,
+      "User-Agent": `pentestcode/${InstallationVersion}`,
     },
     signal: AbortSignal.timeout(10_000),
   }).catch(() => undefined)

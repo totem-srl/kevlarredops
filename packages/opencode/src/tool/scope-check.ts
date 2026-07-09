@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { EngagementStore } from "@opencode-ai/core/engagement/store"
-import { ScopeMatcher } from "@opencode-ai/core/engagement/scope-matcher"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import DESCRIPTION from "./scope-check.txt"
 import * as Tool from "./tool"
 

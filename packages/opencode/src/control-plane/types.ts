@@ -1,8 +1,8 @@
 import { Schema, Struct } from "effect"
-import { ProjectV2 } from "@opencode-ai/core/project"
+import { ProjectV2 } from "@pentestcode/core/project"
 import type { InstanceContext } from "@/project/instance-context"
-import { WorkspaceV2 } from "@opencode-ai/core/workspace"
-import type { DeepMutable } from "@opencode-ai/core/schema"
+import { WorkspaceV2 } from "@pentestcode/core/workspace"
+import type { DeepMutable } from "@pentestcode/core/schema"
 
 export const WorkspaceInfo = Schema.Struct({
   id: WorkspaceV2.ID,

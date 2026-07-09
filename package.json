@@ -96,9 +96,9 @@
     "turbo": "2.10.2"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "workspace:*",
-    "@opencode-ai/script": "workspace:*",
-    "@opencode-ai/sdk": "workspace:*",
+    "@pentestcode/plugin": "workspace:*",
+    "@pentestcode/script": "workspace:*",
+    "@pentestcode/sdk": "workspace:*",
     "typescript": "catalog:"
   },
   "repository": {

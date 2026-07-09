@@ -1,7 +1,7 @@
-import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import type * as SDK from "@opencode-ai/sdk/v2"
-import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import { LayerNode } from "@pentestcode/core/effect/layer-node"
+import { httpClient } from "@pentestcode/core/effect/app-node-platform"
+import type * as SDK from "@pentestcode/sdk/v2"
+import { serviceUse } from "@pentestcode/core/effect/service-use"
 import { Effect, Exit, Layer, Option, Schema, Scope, Context, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Account } from "@/account/account"
@@ -12,13 +12,13 @@ import { Provider } from "@/provider/provider"
 import { Session } from "@/session/session"
 import { MessageV2 } from "@/session/message-v2"
 import type { SessionID } from "@/session/schema"
-import { Database } from "@opencode-ai/core/database/database"
+import { Database } from "@pentestcode/core/database/database"
 import { eq } from "drizzle-orm"
 import { Config } from "@/config/config"
-import { SessionShareTable } from "@opencode-ai/core/share/sql"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
-import { EventV2 } from "@opencode-ai/core/event"
+import { SessionShareTable } from "@pentestcode/core/share/sql"
+import { ProviderV2 } from "@pentestcode/core/provider"
+import { ModelV2 } from "@pentestcode/core/model"
+import { EventV2 } from "@pentestcode/core/event"
 
 const disabled = process.env["OPENCODE_DISABLE_SHARE"] === "true" || process.env["OPENCODE_DISABLE_SHARE"] === "1"
 
@@ -78,7 +78,7 @@ export interface Interface {
   readonly remove: (sessionID: SessionID) => Effect.Effect<void, unknown>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/ShareNext") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/ShareNext") {}
 
 export const use = serviceUse(Service)
 

@@ -29,9 +29,9 @@ import {
   type SetSessionModeRequest,
   type SetSessionModeResponse,
 } from "@agentclientprotocol/sdk"
-import { InstallationVersion } from "@opencode-ai/core/installation/version"
-import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
-import type { AssistantMessage, Message, OpencodeClient, SessionMessageResponse } from "@opencode-ai/sdk/v2"
+import { InstallationVersion } from "@pentestcode/core/installation/version"
+import { AppNodeBuilder } from "@pentestcode/core/effect/app-node-builder"
+import type { AssistantMessage, Message, OpencodeClient, SessionMessageResponse } from "@pentestcode/sdk/v2"
 import { Context, Effect, Layer, ManagedRuntime } from "effect"
 import * as ACPError from "./error"
 import { buildConfigOptions, parseModelSelection } from "./config-option"
@@ -41,12 +41,12 @@ import { ACPEvent } from "./event"
 import { ACPSession } from "./session"
 import { UsageService } from "./usage"
 import { ACPProfile } from "./profile"
-import { ProviderV2 } from "@opencode-ai/core/provider"
-import { ModelV2 } from "@opencode-ai/core/model"
+import { ProviderV2 } from "@pentestcode/core/provider"
+import { ModelV2 } from "@pentestcode/core/model"
 import { Provider } from "@/provider/provider"
 import type { Command } from "@/command"
 
-export const AuthMethodID = "opencode-login"
+export const AuthMethodID = "pentestcode-login"
 
 export type Error = ACPError.Error
 type ServiceConnection = Pick<AgentSideConnection, "sessionUpdate"> &
@@ -70,7 +70,7 @@ export type Interface = {
   readonly cancel: (input: CancelNotification) => Effect.Effect<void, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@opencode/ACP/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@pentestcode/ACP/Service") {}
 
 export function make(input: {
   sdk: OpencodeClient
@@ -92,15 +92,15 @@ export function make(input: {
   const initialize = Effect.fn("ACP.initialize")(function* (params: InitializeRequest) {
     const started = performance.now()
     const authMethod: AuthMethod = {
-      description: "Run `opencode auth login` in the terminal",
-      name: "Login with opencode",
+      description: "Run `pentestcode auth login` in the terminal",
+      name: "Login with pentestcode",
       id: AuthMethodID,
     }
 
     if (params.clientCapabilities?._meta?.["terminal-auth"] === true) {
       authMethod._meta = {
         "terminal-auth": {
-          command: "opencode",
+          command: "pentestcode",
           args: ["auth", "login"],
           label: "PentestCode Login",
         },

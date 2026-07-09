@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect"
-import { EngagementStore } from "@opencode-ai/core/engagement/store"
-import { PentestEvent } from "@opencode-ai/schema/pentest-event"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { FSUtil } from "@opencode-ai/core/fs-util"
+import { FSUtil } from "@pentestcode/core/fs-util"
 import DESCRIPTION from "./gobuster-parse.txt"
 import * as Tool from "./tool"
 

@@ -1,6 +1,6 @@
-import { Pty } from "@opencode-ai/core/pty"
-import { PtyTicket } from "@opencode-ai/core/pty/ticket"
-import { PtyID } from "@opencode-ai/core/pty/schema"
+import { Pty } from "@pentestcode/core/pty"
+import { PtyTicket } from "@pentestcode/core/pty/ticket"
+import { PtyID } from "@pentestcode/core/pty/schema"
 import { PTY_CONNECT_TICKET_QUERY } from "@/server/shared/pty-ticket"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
@@ -130,7 +130,7 @@ export const PtyApi = HttpApi.make("pty")
   )
   .annotateMerge(
     OpenApi.annotations({
-      title: "opencode experimental HttpApi",
+      title: "pentestcode experimental HttpApi",
       version: "0.0.1",
       description: "Experimental HttpApi surface for selected instance routes.",
     }),

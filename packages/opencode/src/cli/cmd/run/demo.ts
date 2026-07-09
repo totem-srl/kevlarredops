@@ -15,7 +15,7 @@
 // Demo mode also handles permission and question replies locally, completing
 // or failing the synthetic tool parts as appropriate.
 import path from "path"
-import type { Event, ToolPart } from "@opencode-ai/sdk/v2"
+import type { Event, ToolPart } from "@pentestcode/sdk/v2"
 import { createSessionData, reduceSessionData, type SessionData } from "./session-data"
 import { writeSessionOutput } from "./stream"
 import type { FooterApi, PermissionReply, QuestionReject, QuestionReply, RunPrompt, StreamCommit } from "./types"
@@ -831,7 +831,7 @@ function emitPermission(state: State, kind: PermissionKind = "edit"): void {
       always: [target],
       done: {
         title: "read",
-        output: ["1: {", '2:   "name": "opencode",', '3:   "private": true', "4: }"].join("\n"),
+        output: ["1: {", '2:   "name": "pentestcode",', '3:   "private": true', "4: }"].join("\n"),
         metadata: {},
       },
     })

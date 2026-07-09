@@ -1,8 +1,8 @@
-import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
-import { EventV2 } from "@opencode-ai/core/event"
+import { ConfigV1 } from "@pentestcode/core/v1/config/config"
+import { EventV2 } from "@pentestcode/core/event"
 import { EventManifest } from "@/event-manifest"
 import { InstanceDisposed } from "@/server/event"
-import "@opencode-ai/core/account"
+import "@pentestcode/core/account"
 import "@/server/event"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
@@ -127,8 +127,8 @@ export const GlobalApi = HttpApi.make("global").add(
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.upgrade",
-          summary: "Upgrade opencode",
-          description: "Upgrade opencode to the specified version or latest if not specified.",
+          summary: "Upgrade pentestcode",
+          description: "Upgrade pentestcode to the specified version or latest if not specified.",
         }),
       ),
     )

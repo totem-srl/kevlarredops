@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
-import { EngagementStore } from "@opencode-ai/core/engagement/store"
-import { EngagementSchema } from "@opencode-ai/core/engagement/schema"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import DESCRIPTION from "./state-query.txt"
 import * as Tool from "./tool"
 
