@@ -210,13 +210,19 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
   }
 
   if (method === "curl" && targets.binary) {
-    UI.empty()
-    prompts.log.message("To finish removing the binary, run:")
-    prompts.log.info(`  rm "${targets.binary}"`)
+    spinner.start("Removing binary...")
+    const binErr = await fs.rm(targets.binary, { force: true }).catch((e: Error) => e)
+    if (binErr) {
+      spinner.stop("Could not remove binary automatically", 1)
+      prompts.log.message("Remove it manually:")
+      prompts.log.info(`  rm "${targets.binary}"`)
+    } else {
+      spinner.stop("Removed binary")
+    }
 
     const binDir = path.dirname(targets.binary)
     if (binDir.includes(".pentestcode") || binDir.includes(".opencode")) {
-      prompts.log.info(`  rmdir "${binDir}" 2>/dev/null`)
+      await fs.rmdir(binDir).catch(() => {})
     }
   }
 
