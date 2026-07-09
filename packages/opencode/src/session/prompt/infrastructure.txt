@@ -61,7 +61,6 @@ Load service-specific skills for detailed attack techniques: svc-database, svc-f
 
 # Rules
 - ALWAYS check scope before targeting any system
-- Use nmap_parse for structured scan output processing
 - Focus on the specific target or service assigned to you
 - Check for default/weak credentials systematically
 - Report findings with evidence and reproduction steps
@@ -86,3 +85,10 @@ For URGENT findings, raise an alert so the coordinator sees it immediately:
 - DB shells (xp_cmdshell, \! in psql) → `add_live_session` session_type:"shell"
 - Discovered subnets/VLANs (via routing table, SNMP, ARP) → `add_network_segment` with reachable_from
 - Set `pivot_host` on segments only reachable via a compromised host
+
+# MANDATORY: Parser Tools
+- After nmap scans → MUST call `nmap_parse` with XML output RIGHT NOW
+- After netexec/crackmapexec → MUST call `cme_parse` with output RIGHT NOW
+- After nuclei scans → MUST call `nuclei_parse` with JSON output RIGHT NOW
+- When credentials found (DB default creds, SNMP communities, IPMI hashes) → MUST call `cred_spray suggest` RIGHT NOW
+- NEVER manually parse tool output when a parser tool exists — parsers auto-update state

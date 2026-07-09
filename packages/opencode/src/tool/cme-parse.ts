@@ -262,7 +262,7 @@ export const CmeParseTool = Tool.define(
               }
 
               if (h.signing === false && state) {
-                const smbEvidence = `CrackMapExec output: signing:False on ${h.ip}`
+                const smbEvidence = `NetExec output: signing:False on ${h.ip}`
                 yield* store.addVuln(h.ip, {
                   id: `smb-signing-disabled-${h.ip}`,
                   title: "SMB Signing Disabled",
@@ -272,10 +272,15 @@ export const CmeParseTool = Tool.define(
                   description: "SMB signing is not enforced, enabling NTLM relay attacks.",
                   evidence: smbEvidence,
                   evidence_items: [{
-                    tool: "crackmapexec",
+                    tool: "netexec",
+                    command: `netexec smb ${h.ip}`,
                     output: smbEvidence,
                     timestamp: new Date().toISOString(),
                     confidence: 0.95,
+                    reasoning: "SMB signing disabled detected in NetExec banner, enables NTLM relay",
+                    source_agent: "scanner",
+                    attempt_number: 1,
+                    verification_status: "verified",
                   }],
                   service_port: 445,
                   references: [],

@@ -1,0 +1,17 @@
+Manage network tunnels and pivoting sessions. Plan tunnel commands, register established tunnels as live sessions in engagement state, list active tunnels, or remove dead sessions. Does NOT execute commands — generates them for the agent to review and run.
+
+Parameters:
+- action: "plan" to generate tunnel commands, "register" to record an established tunnel, "list" to show active tunnels, "remove" to mark a session dead
+- host_ip: Target host IP (required for plan/register)
+- tunnel_type: "ssh_local"|"ssh_dynamic"|"socks"|"port_forward"|"chisel"|"ligolo" (for plan/register)
+- local_port: Local port to bind (for plan/register)
+- remote_target: Remote target host/IP for port forwarding (for plan with port_forward/ssh_local)
+- remote_port: Remote target port (for plan with port_forward/ssh_local)
+- username: SSH/auth username (for plan; will also check engagement credentials if omitted)
+- credential_id: Credential ID from engagement state (alternative to username for plan)
+- session_id: Session ID (required for remove)
+
+For "plan": Generates the exact tunnel command based on tunnel_type, credentials from engagement state, and network topology. Supports SSH, chisel, and ligolo-ng.
+For "register": Records a successfully established tunnel as a live_session in engagement state for tracking.
+For "list": Shows all active tunnels/sessions with their details.
+For "remove": Removes a dead/closed session from engagement state.

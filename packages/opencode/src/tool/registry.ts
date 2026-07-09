@@ -37,6 +37,11 @@ import { PhaseControlTool } from "./phase-control"
 import { ReportGenTool } from "./report-gen"
 import { TaskGraphTool } from "./task-graph"
 import { CredSprayTool } from "./cred-spray"
+import { SqlmapParseTool } from "./sqlmap-parse"
+import { XssDetectTool } from "./xss-detect"
+import { JwtAnalyzeTool } from "./jwt-analyze"
+import { TunnelManageTool } from "./tunnel-manage"
+import { PivotSuggestTool } from "./pivot-suggest"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import * as Truncate from "./truncate"
 import { Glob } from "@pentestcode/core/util/glob"
@@ -128,6 +133,11 @@ const layer = Layer.effect(
     const gobusterparse = yield* GobusterParseTool
     const cmeparse = yield* CmeParseTool
     const bloodhoundparse = yield* BloodHoundParseTool
+    const sqlmapparse = yield* SqlmapParseTool
+    const xssdetect = yield* XssDetectTool
+    const jwtanalyze = yield* JwtAnalyzeTool
+    const tunnelmanage = yield* TunnelManageTool
+    const pivotsuggest = yield* PivotSuggestTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -244,6 +254,11 @@ const layer = Layer.effect(
           gobusterparse: Tool.init(gobusterparse),
           cmeparse: Tool.init(cmeparse),
           bloodhoundparse: Tool.init(bloodhoundparse),
+          sqlmapparse: Tool.init(sqlmapparse),
+          xssdetect: Tool.init(xssdetect),
+          jwtanalyze: Tool.init(jwtanalyze),
+          tunnelmanage: Tool.init(tunnelmanage),
+          pivotsuggest: Tool.init(pivotsuggest),
         })
 
         return {
@@ -273,6 +288,11 @@ const layer = Layer.effect(
             tool.gobusterparse,
             tool.cmeparse,
             tool.bloodhoundparse,
+            tool.sqlmapparse,
+            tool.xssdetect,
+            tool.jwtanalyze,
+            tool.tunnelmanage,
+            tool.pivotsuggest,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,

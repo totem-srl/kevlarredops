@@ -8,6 +8,7 @@ import * as Tool from "./tool"
 
 export const Parameters = Schema.Struct({
   action: Schema.Literals([
+    "batch",
     "add_host",
     "delete_host",
     "add_vuln",
@@ -46,7 +47,7 @@ export const Parameters = Schema.Struct({
     description: "The mutation to perform on the engagement state.",
   }),
   data: Schema.Unknown.annotate({
-    description: "Action-specific data. See tool description for required fields per action.",
+    description: "Action-specific data. See tool description for required fields per action. For batch: {operations: [{action, data}, ...]}",
   }),
 })
 
@@ -63,17 +64,14 @@ export const StateUpdateTool = Tool.define(
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
     const events = yield* EventV2Bridge.Service
-    return {
-      description: DESCRIPTION,
-      parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
-        Effect.gen(function* () {
-          const raw = params.data ?? {}
-          const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
+    const executeAction = (params: { action: string; data: unknown }, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
+      Effect.gen(function* () {
+        const raw = params.data ?? {}
+        const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
 
-          switch (params.action) {
-            // --- Lifecycle ---
-            case "create_engagement": {
+        switch (params.action) {
+          // --- Lifecycle ---
+          case "create_engagement": {
               const name = d.name as string
               if (!name) {
                 return { title: "Error", metadata: {}, output: "Error: data.name is required for create_engagement." }
@@ -992,6 +990,63 @@ export const StateUpdateTool = Tool.define(
               return { title: "Error", metadata: {}, output: `Unknown action: ${params.action}` }
             }
           }
+        }).pipe(Effect.orDie)
+
+    return {
+      description: DESCRIPTION,
+      parameters: Parameters,
+      execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
+        Effect.gen(function* () {
+          if (params.action === "batch") {
+            const raw = params.data ?? {}
+            const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
+            const ops = d.operations as Array<{ action: string; data: unknown }> | undefined
+            if (!Array.isArray(ops) || ops.length === 0) {
+              return {
+                title: "Error",
+                metadata: {},
+                output: "Error: data.operations must be a non-empty array of {action, data} objects.",
+              }
+            }
+            if (ops.length > 100) {
+              return {
+                title: "Error",
+                metadata: {},
+                output: "Error: batch limited to 100 operations. Split into multiple batches.",
+              }
+            }
+            const results: string[] = []
+            let succeeded = 0
+            let failed = 0
+            for (const op of ops) {
+              if (!op.action || typeof op.action !== "string") {
+                results.push(`[FAIL] missing action`)
+                failed++
+                continue
+              }
+              try {
+                const subResult = yield* executeAction({ action: op.action, data: op.data }, _ctx)
+                if (subResult.title === "Error") {
+                  results.push(`[FAIL] ${op.action}: ${subResult.output}`)
+                  failed++
+                } else {
+                  results.push(`[OK] ${op.action}: ${subResult.title}`)
+                  succeeded++
+                }
+              } catch (err: unknown) {
+                results.push(`[FAIL] ${op.action}: ${String(err)}`)
+                failed++
+              }
+            }
+            const updated = yield* store.get()
+            if (updated) yield* store.save(updated)
+            return {
+              title: `Batch: ${succeeded}/${ops.length} succeeded`,
+              metadata: { succeeded, failed, total: ops.length },
+              output: `Batch: ${succeeded} succeeded, ${failed} failed out of ${ops.length} operations.\n${results.join("\n")}${updated ? `\n${countsLine(updated)}` : ""}`,
+            }
+          }
+          return yield* executeAction(params, _ctx)
         }).pipe(Effect.orDie),
     }
   }),

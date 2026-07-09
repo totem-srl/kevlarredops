@@ -49,12 +49,19 @@ export const Service = Schema.Struct({
 }).annotate({ identifier: "Engagement.Service" })
 export type Service = typeof Service.Type
 
+export const VerificationStatus = Schema.Literals(["unverified", "verified", "false_positive"])
+export type VerificationStatus = typeof VerificationStatus.Type
+
 export const EvidenceItem = Schema.Struct({
   tool: Schema.String,
   command: Schema.optional(Schema.String),
   output: Schema.String,
   timestamp: Schema.optional(Schema.String),
   confidence: Schema.optional(Schema.Number),
+  reasoning: Schema.optional(Schema.String),
+  source_agent: Schema.optional(Schema.String),
+  attempt_number: Schema.optional(Schema.Number),
+  verification_status: Schema.optional(VerificationStatus),
 }).annotate({ identifier: "Engagement.EvidenceItem" })
 export type EvidenceItem = typeof EvidenceItem.Type
 
@@ -491,7 +498,42 @@ export function summary(state: State) {
   }
 }
 
-export function toCompactContext(state: State, maxHosts = 20): string {
+export function decisionSummary(decisions: Decision[]): {
+  total: number
+  successful: number
+  failed: number
+  pending: number
+  failedVectors: string[]
+} {
+  const successful = decisions.filter((d) => d.outcome === "successful").length
+  const failed = decisions.filter((d) => d.outcome === "failed")
+  const pending = decisions.filter((d) => !d.outcome || d.outcome === "pending").length
+  return {
+    total: decisions.length,
+    successful,
+    failed: failed.length,
+    pending,
+    failedVectors: failed.slice(-5).map((d) => d.decision),
+  }
+}
+
+export interface CompactContextOpts {
+  maxVulnsPerHost?: number
+  maxServicesPerHost?: number
+  maxRelationships?: number
+  maxObjectives?: number
+  excludeOODAFields?: boolean
+}
+
+const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 }
+
+export function toCompactContext(state: State, maxHosts = 20, opts?: CompactContextOpts): string {
+  const maxVulns = opts?.maxVulnsPerHost ?? 10
+  const maxServices = opts?.maxServicesPerHost ?? 15
+  const maxRels = opts?.maxRelationships ?? 30
+  const maxObjs = opts?.maxObjectives ?? 10
+  const excludeOODA = opts?.excludeOODAFields ?? true
+
   const s = summary(state)
   const data: Record<string, unknown> = {
     scope: { targets: state.scope.targets, excludes: state.scope.excludes },
@@ -503,22 +545,34 @@ export function toCompactContext(state: State, maxHosts = 20): string {
 
   const hostEntries = Object.entries(state.hosts).slice(0, maxHosts)
   for (const [ip, host] of hostEntries) {
+    const shownServices = host.services.slice(0, maxServices)
     const h: Record<string, unknown> = {
-      services: host.services.map((svc) => ({
+      services: shownServices.map((svc) => ({
         port: svc.port,
         service: svc.service,
         version: svc.version || undefined,
       })),
     }
+    if (host.services.length > maxServices) h.services_omitted = host.services.length - maxServices
     if (host.hostname) h.hostname = host.hostname
     if (host.os) h.os = host.os
-    if (host.vulns.length > 0)
-      h.vulns = host.vulns.map((v) => ({
+    if (host.vulns.length > 0) {
+      const sorted = [...host.vulns].sort((a, b) =>
+        (SEVERITY_ORDER[a.severity ?? "medium"] ?? 3) - (SEVERITY_ORDER[b.severity ?? "medium"] ?? 3),
+      )
+      const shown = sorted.slice(0, maxVulns)
+      h.vulns = shown.map((v) => ({
         title: v.title,
         severity: v.severity,
         status: v.status,
         ...(v.confidence !== undefined ? { conf: v.confidence } : {}),
+        ...(v.evidence_items?.length ? {
+          evidence_count: v.evidence_items.length,
+          verified_by: [...new Set(v.evidence_items.filter((e) => e.verification_status === "verified").map((e) => e.source_agent).filter(Boolean))],
+        } : {}),
       }))
+      if (host.vulns.length > maxVulns) h.vulns_omitted = host.vulns.length - maxVulns
+    }
     if (host.access.length > 0)
       h.access = host.access.map((a) => ({
         type: a.access_type,
@@ -528,6 +582,7 @@ export function toCompactContext(state: State, maxHosts = 20): string {
       }))
     ;(data.hosts as Record<string, unknown>)[ip] = h
   }
+  if (Object.keys(state.hosts).length > maxHosts) data.hosts_omitted = Object.keys(state.hosts).length - maxHosts
 
   if (state.domain) {
     const dom: Record<string, unknown> = { name: state.domain.domain_name }
@@ -547,7 +602,14 @@ export function toCompactContext(state: State, maxHosts = 20): string {
   if (state.objectives) {
     const objs = Object.values(state.objectives)
     if (objs.length > 0) {
-      data.objectives = objs.map((o) => {
+      const priorityOrder: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+      const sorted = [...objs].sort((a, b) => {
+        if (a.status === "completed" && b.status !== "completed") return 1
+        if (a.status !== "completed" && b.status === "completed") return -1
+        return (priorityOrder[a.priority ?? "medium"] ?? 2) - (priorityOrder[b.priority ?? "medium"] ?? 2)
+      })
+      const shown = sorted.slice(0, maxObjs)
+      data.objectives = shown.map((o) => {
         const compact: Record<string, unknown> = { id: o.id, title: o.title, status: o.status }
         if (o.priority) compact.priority = o.priority
         if (o.category) compact.category = o.category
@@ -558,43 +620,48 @@ export function toCompactContext(state: State, maxHosts = 20): string {
       })
       const completed = objs.filter((o) => o.status === "completed").length
       data.objectives_progress = `${completed}/${objs.length} completed`
+      if (objs.length > maxObjs) data.objectives_omitted = objs.length - maxObjs
     }
   }
 
   if (state.relationships && state.relationships.length > 0) {
-    data.relationships = state.relationships.map((r) => `${r.source_type}:${r.source_id}-[${r.rel_type}]->${r.target_type}:${r.target_id}`)
+    const shown = state.relationships.slice(-maxRels)
+    data.relationships = shown.map((r) => `${r.source_type}:${r.source_id}-[${r.rel_type}]->${r.target_type}:${r.target_id}`)
+    if (state.relationships.length > maxRels) data.relationships_omitted = state.relationships.length - maxRels
   }
 
-  const alerts = activeAlerts(state)
-  if (alerts.length > 0) {
-    data.alerts = alerts.map((a) => ({
-      severity: a.severity,
-      title: a.title,
-      ...(a.host_ip ? { host: a.host_ip } : {}),
-      ...(a.source_agent ? { from: a.source_agent } : {}),
-    }))
-  }
+  if (!excludeOODA) {
+    const alerts = activeAlerts(state)
+    if (alerts.length > 0) {
+      data.alerts = alerts.map((a) => ({
+        severity: a.severity,
+        title: a.title,
+        ...(a.host_ip ? { host: a.host_ip } : {}),
+        ...(a.source_agent ? { from: a.source_agent } : {}),
+      }))
+    }
 
-  const sessions = aliveSessions(state)
-  if (sessions.length > 0) {
-    data.live_sessions = sessions.map((s) => ({
-      type: s.session_type,
-      host: s.host_ip,
-      ...(s.port ? { port: s.port } : {}),
-      ...(s.username ? { user: s.username } : {}),
-      ...(s.remote_target ? { target: s.remote_target } : {}),
-    }))
-  }
+    const sessions = aliveSessions(state)
+    if (sessions.length > 0) {
+      data.live_sessions = sessions.map((s) => ({
+        type: s.session_type,
+        host: s.host_ip,
+        ...(s.port ? { port: s.port } : {}),
+        ...(s.username ? { user: s.username } : {}),
+        ...(s.remote_target ? { target: s.remote_target } : {}),
+      }))
+    }
 
-  const segments = state.network_segments ?? []
-  if (segments.length > 0) {
-    data.network_segments = segments.map((seg) => ({
-      id: seg.id,
-      cidr: seg.cidr,
-      ...(seg.vlan !== undefined ? { vlan: seg.vlan } : {}),
-      ...(seg.pivot_host ? { pivot: seg.pivot_host } : {}),
-      ...(seg.reachable_from?.length ? { reachable_from: seg.reachable_from } : {}),
-    }))
+    const segments = state.network_segments ?? []
+    if (segments.length > 0) {
+      data.network_segments = segments.map((seg) => ({
+        id: seg.id,
+        cidr: seg.cidr,
+        ...(seg.vlan !== undefined ? { vlan: seg.vlan } : {}),
+        ...(seg.pivot_host ? { pivot: seg.pivot_host } : {}),
+        ...(seg.reachable_from?.length ? { reachable_from: seg.reachable_from } : {}),
+      }))
+    }
   }
 
   return JSON.stringify(data, undefined, 2)

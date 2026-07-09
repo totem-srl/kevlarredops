@@ -76,7 +76,7 @@ Prompts in: `packages/opencode/src/session/prompt/*.txt` and `packages/opencode/
 - **Engagement schema**: `packages/core/src/engagement/schema.ts` (Effect Schema, State/Host/Vuln/Cred types)
 - **Engagement store**: `packages/core/src/engagement/store.ts` (global Ref + JSON persistence)
 - **Engagement context (V2)**: `packages/core/src/engagement/context.ts` (SystemContext source, V2 only)
-- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`
+- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`, `sqlmap-parse.ts`, `xss-detect.ts`, `jwt-analyze.ts`, `tunnel-manage.ts`, `pivot-suggest.ts`
 - **App runtime (V1)**: `packages/opencode/src/effect/app-runtime.ts` (LayerNode graph)
 - **Location services (V2)**: `packages/core/src/location-services.ts` (V2 layer graph)
 - **Config**: `.opencode/opencode.jsonc` (will rename to `.pentestcode/`)
@@ -233,21 +233,67 @@ bun turbo typecheck
 └── evidence/           # Wave 3 — deletable folder, files per vuln_id
 ```
 
+## What Was Done (Competitive Gap Closure — 2026-07-09)
+
+### Gap 1: Decision Memory Context Injection
+- [x] `prompt.ts` now injects `<decision-history>` section into engagement context every turn
+- [x] Shows last 5 decisions with outcomes (successful/failed/pending)
+- [x] Failure escalation: 3+ failures triggers warning to avoid repeating and spawn critic
+- [x] `decisionSummary()` helper in schema.ts for aggregating decision stats
+
+### Gap 2: Evidence Chain Extension
+- [x] `EvidenceItem` schema extended with: `reasoning`, `source_agent`, `attempt_number`, `verification_status`
+- [x] `VerificationStatus` type: "unverified"|"verified"|"false_positive"
+- [x] Nuclei parser populates all new evidence fields (reasoning, source_agent, attempt, verification)
+- [x] CME parser populates evidence fields for SMB signing findings
+- [x] Report generator renders full evidence chain per finding (tool, agent, attempt#, status, reasoning)
+- [x] Compact context shows evidence_count + verified_by agents for each vuln
+
+### Gap 3: Web Application Tools (3 new tools)
+- [x] **sqlmap_parse** — parse sqlmap JSON/text output, extract injection points/params/techniques/databases, auto-create vulns
+- [x] **xss_detect** — analyze HTTP responses for reflected/stored XSS, check CSP/X-XSS-Protection headers, classify findings
+- [x] **jwt_analyze** — decode JWT, check alg:none/weak HMAC secrets/JKU injection/expiry/missing claims/admin escalation
+- [x] All 3 registered in registry.ts, permissions granted to pentest/webapp/exploiter agents
+- [x] Each tool auto-updates engagement state with findings + evidence chain
+
+### Gap 4: Network Pivoting & Tunnel Tools (2 new tools)
+- [x] **tunnel_manage** — plan tunnel commands (SSH/chisel/ligolo), register/list/remove live sessions in state
+- [x] **pivot_suggest** — BFS path-finding over relationship graph, strategic target scoring (DCs prioritized), network segment awareness
+- [x] Both registered in registry.ts, permissions granted to pentest/post_exploit/infrastructure agents
+
+### Gap 5: Benchmark Infrastructure
+- [x] `bench/verify-claims.ts` — validates tool availability (17/17), schema coverage (14/14), decision injection
+- [x] 5 benchmark challenges: nmap-parse, nuclei-parse, cred-spray-plan, scope-check, cme-parse-ad
+- [x] `bench/challenges/` directory with JSON challenge definitions
+- [x] `bench/results/` directory for benchmark run outputs
+- [x] Exit code 0 = all claims verified, exit code 1 = gaps remain
+
+### NetExec Migration (crackmapexec → netexec)
+- [x] `cred_spray` tool: all spray commands now use `netexec` instead of `crackmapexec`
+- [x] `cme_parse` tool: evidence references updated to "netexec"
+- [x] `cred-spray.txt` and `cme-parse.txt` descriptions updated
+
+### Session Critique Fixes (from Standoff365 session analysis — 2026-07-09)
+- [x] **Mandatory Parser Workflow** — added MANDATORY section to pentest.txt + all 8 subagent prompts binding nmap→nmap_parse, netexec→cme_parse, nuclei→nuclei_parse, gobuster→gobuster_parse, sqlmap→sqlmap_parse, bloodhound→bloodhound_parse, creds→cred_spray. Anti-patterns documented.
+- [x] **Batch state_update** — new `batch` action accepts `{operations: [{action,data},...]}` array (max 100). Turns 40 sequential LLM steps into 1 for initial engagement setup. Prompt guidance added.
+- [x] **Context Size Reduction** — `toCompactContext()` now has caps: 10 vulns/host (by severity), 15 services/host, 30 relationships, 10 objectives. OODA fields (alerts/sessions/segments) excluded by default (already in `toOODAContext()`). Conditional injection: full state on step 1 + every 8th step, summary-only on other steps. ~75% token reduction.
+- [x] **Parallel Dispatch Strengthening** — added CORRECT/WRONG examples with multi-tool-use blocks to orchestrator-mode.txt and pentest.txt. Explicit anti-pattern: "dispatch one per turn → WRONG".
+
 ## What Remains (TODO)
 
-### Wave 3: Strategy (next)
-- [ ] **Decision Memory** (#8) — decisions.json, strategic decisions only, retention 100. `add_decision`/`update_decision_outcome`. ~2 days.
-- [ ] **Alert Queue** (#9) — `alerts[]` in state for urgent inter-agent findings. TTL 1hr, max 50 active. Auto-alert on critical findings. ~1-2 days.
-- [ ] **OODA Structured Reasoning** (#10) — auto-generated situation section in prompt (changes, coverage, failures, ready tasks, alerts). ~2-3 days.
-- [ ] **Attack Path Derivation** (#11) — tool for computing possible paths to objectives from state + relationships. BFS/DFS + scoring. ~3-5 days.
-- [ ] **Parallel Subagent Improvements** (#12) — better dispatch via task_graph, agent context carry on re-spawn. ~2-3 days.
+### Wave 3: Strategy (remaining items)
+- [x] **Decision Memory** (#8) — decisions.json fully implemented (schema, store, CRUD, state_update/state_query). Context injection into prompt added.
+- [x] **Alert Queue** (#9) — fully implemented (schema, store, TTL, max 50, OODA display, state_update/state_query).
+- [x] **OODA Structured Reasoning** (#10) — `toOODAContext()` fully implemented (changes, coverage, gaps, alerts, sessions, segments, tasks, objectives).
+- [ ] **Attack Path Derivation** (#11) — `pivot_suggest` provides BFS over relationships. Full cost-based optimization with scoring still TODO. ~2-3 days.
+- [x] **Parallel Subagent Improvements** (#12) — parallel dispatch examples + anti-patterns in orchestrator-mode.txt and pentest.txt. Agent context carry on re-spawn still TODO.
 
 ### Agent Quality (from real Standoff365 testing)
 - [x] ~~Scope guard on bash tool~~ — CANCELLED per Zhangir's decision
-- [ ] Tool knowledge in prompts — agent misuses tool flags (e.g. `--dpapi cookies` instead of bare `--dpapi`). Add more tool-specific knowledge to skills and prompts as issues surface during testing.
+- [x] Tool knowledge in prompts — mandatory parser workflow added to all agent prompts. Parser tools now MUST be used after their corresponding bash commands. Additional tool-specific knowledge can be added as issues surface.
 - [ ] Inter-agent communication — subagents run in isolation, can't signal coordinator mid-run. Need pub/sub or priority message passing for urgent findings (e.g. scanner finds DC → coordinator should know immediately).
-- [ ] Session/shell tracking — no model for alive shells, active listeners, established tunnels. Agent loses track of what's reachable.
-- [ ] Network segmentation model — VLANs, reachable networks from each pivot point. Currently agent has no concept of what segments are accessible from where.
+- [x] Session/shell tracking — `LiveSession` schema + `tunnel_manage` tool + `live_sessions` in OODA context. Agents can now register/track/remove tunnels and shells.
+- [x] Network segmentation model — `NetworkSegment` schema + `pivot_suggest` tool. VLANs, reachable networks, pivot hosts tracked in state and used for path suggestions.
 
 ### Slash Commands
 - [ ] `/playbook` — load and follow a playbook interactively
@@ -277,14 +323,14 @@ bun turbo typecheck
 - [ ] End-to-end test on CTF target with new build
 - [ ] Verify engagement state persistence across sessions
 - [ ] Test multi-agent coordination (coordinator spawns 3+ subagents in parallel)
-- [ ] Test parser tools with real tool output (nmap, nuclei, crackmapexec, gobuster, bloodhound)
+- [ ] Test parser tools with real tool output (nmap, nuclei, netexec, gobuster, bloodhound, sqlmap)
 
 ## Design Decisions
 
 - **Hard fork, no upstream tracking** — deep domain changes make merging impractical
 - **Multi-agent strategist-operator split** — pentest agent coordinates, subagents execute (4.3x improvement per HPTSA research)
 - **Pentesting Task Tree (PTT)** — hierarchical attack tree with difficulty scoring, strategic abandonment, credential propagation
-- **Selective context injection** — don't dump full state each turn; assemble minimal relevant context
+- **Selective context injection** — full state every 8 turns, summary+diff on other turns; OODA and compact contexts deduplicated
 - **4-layer prompt system** — identity (always) → engagement state (dynamic) → phase skill (per-phase) → service knowledge (on-demand)
 - **File-based engagement store** — single JSON at `~/.pentestcode/engagements/<name>/state.json`, not relational; simpler and portable
 - **Global storage** — engagements at `~/.pentestcode/engagements/`, not per-directory. Security work isn't tied to cwd. Supports parallel activities (bounty + CTF + work pentest).

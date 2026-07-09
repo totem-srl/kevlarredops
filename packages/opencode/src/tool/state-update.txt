@@ -1,8 +1,13 @@
-Update the engagement state. IMPORTANT: Call this IMMEDIATELY after discovering any host, service, vulnerability, credential, or access. Do not batch updates — call once per discovery, in the SAME response as the finding. Every finding that is not recorded here is LOST.
+Update the engagement state. IMPORTANT: Call this IMMEDIATELY after discovering any host, service, vulnerability, credential, or access. Every finding that is not recorded here is LOST.
+
+For real-time discoveries during active work: call once per finding, in the SAME response.
+For bulk imports (5+ items from files, previous scans, initial setup): use action="batch" with data={operations: [{action, data}, ...]}. Max 100 operations per batch.
 
 Changes are persisted to disk immediately.
 
 Actions and their required data fields:
+
+- batch: { operations: Array<{ action: string, data: object }> } — process multiple state updates in one call. Max 100 operations. Use for initial engagement setup, importing scan results, loading state from files. Each operation uses the same format as individual calls below.
 
 - create_engagement: { name: string }
 - load_engagement: { name: string }

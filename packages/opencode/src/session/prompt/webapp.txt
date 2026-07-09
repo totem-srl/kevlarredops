@@ -80,4 +80,11 @@ For URGENT findings:
 - RCE achieved (SSTI, deserialization, command injection) → `state_update add_alert` severity:critical
 - SQL injection confirmed → `state_update add_alert` severity:high
 - Admin panel access → `state_update add_alert` severity:high
-- Parse gobuster/feroxbuster output with `gobuster_parse` for auto state update.
+
+# MANDATORY: Parser Tools
+- After gobuster/feroxbuster/ffuf → MUST call `gobuster_parse` with output RIGHT NOW
+- After nuclei web scans → MUST call `nuclei_parse` with JSON output RIGHT NOW
+- After sqlmap → MUST call `sqlmap_parse` with output RIGHT NOW
+- For XSS findings → MUST call `xss_detect` for validation RIGHT NOW
+- For JWT attacks → MUST call `jwt_analyze` RIGHT NOW
+- NEVER manually parse tool output when a parser tool exists — parsers auto-update state

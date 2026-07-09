@@ -1,0 +1,11 @@
+Analyze engagement state to suggest pivot paths through the network. Uses relationships, network segments, compromised hosts, and available credentials to recommend the best lateral movement routes.
+
+Parameters:
+- from_host: Starting host IP (defaults to first compromised host if omitted)
+- to_host: Destination host IP (if known — finds shortest path)
+- objective: What you're trying to reach (e.g. "domain controller", "10.10.10.0/24 subnet")
+
+When to_host is specified: finds the shortest path using BFS over relationships and network segments.
+When to_host is omitted: suggests unexplored hosts/segments reachable from compromised hosts, ordered by strategic value (DCs first, then hosts with many services, then others).
+
+Each suggestion includes: the pivot chain, required credentials, recommended tunnel type, and estimated complexity.

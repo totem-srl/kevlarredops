@@ -78,22 +78,22 @@ function buildCommand(service: string, host: string, username: string, value: st
   switch (service) {
     case "smb":
       return isHash
-        ? `crackmapexec smb ${host} -u '${u}' -H '${value}'`
-        : `crackmapexec smb ${host} -u '${u}' -p '${value}'`
+        ? `netexec smb ${host} -u '${u}' -H '${value}'`
+        : `netexec smb ${host} -u '${u}' -p '${value}'`
     case "winrm":
       return isHash
-        ? `crackmapexec winrm ${host} -u '${u}' -H '${value}'`
-        : `crackmapexec winrm ${host} -u '${u}' -p '${value}'`
+        ? `netexec winrm ${host} -u '${u}' -H '${value}'`
+        : `netexec winrm ${host} -u '${u}' -p '${value}'`
     case "rdp":
       return isHash
-        ? `crackmapexec rdp ${host} -u '${u}' -H '${value}'`
-        : `crackmapexec rdp ${host} -u '${u}' -p '${value}'`
+        ? `netexec rdp ${host} -u '${u}' -H '${value}'`
+        : `netexec rdp ${host} -u '${u}' -p '${value}'`
     case "ssh":
-      return `crackmapexec ssh ${host} -u '${u}' -p '${value}'`
+      return `netexec ssh ${host} -u '${u}' -p '${value}'`
     case "mssql":
       return isHash
-        ? `crackmapexec mssql ${host} -u '${u}' -H '${value}'`
-        : `crackmapexec mssql ${host} -u '${u}' -p '${value}'`
+        ? `netexec mssql ${host} -u '${u}' -H '${value}'`
+        : `netexec mssql ${host} -u '${u}' -p '${value}'`
     case "mysql":
       return `mysql -h ${host} -u '${u}' -p'${value}' -e 'SELECT 1' 2>&1 | head -5`
     case "postgresql":

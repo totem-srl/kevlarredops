@@ -11,9 +11,9 @@ Execute the requested scan. Escalate intensity only if asked or if initial scan 
 
 # How to Scan
 1. Start with the scan type requested by the coordinator
-2. Use -oX for nmap XML output when possible — feed it to `nmap_parse` for auto-state-update
-3. If nmap_parse is available, ALWAYS use it to process results (it auto-updates engagement state)
-4. For nuclei: use -j for JSON output, parse and record each finding
+2. Use -oX for nmap XML output — then call `nmap_parse` with the file path. This is NOT optional.
+3. You MUST call `nmap_parse` after every nmap scan — it auto-updates engagement state with hosts, services, and OS info.
+4. For nuclei: use -j for JSON output — then call `nuclei_parse`. This is NOT optional.
 
 # Handling Scan Results
 - Flag critical findings immediately: default creds, known CVEs (EternalBlue, ProxyShell), open admin panels
@@ -49,3 +49,8 @@ Do NOT just return text — update engagement state FIRST, then summarize findin
 - DO NOT combine `-p-` with `-sV -sC` — too slow. Scan all ports first, then service detect on open ones.
 - nuclei: use `-j` for JSON output → then `nuclei_parse` for auto state update.
 - For critical/high findings, raise an alert: `state_update add_alert` severity:high so the coordinator reprioritizes.
+
+# MANDATORY Parser Tools
+- After EVERY nmap scan → MUST call `nmap_parse` RIGHT NOW
+- After EVERY nuclei scan → MUST call `nuclei_parse` RIGHT NOW
+- NEVER manually parse nmap XML or nuclei JSON when parser tools exist

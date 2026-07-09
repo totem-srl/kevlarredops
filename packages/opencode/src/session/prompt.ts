@@ -1329,13 +1329,23 @@ const layer = Layer.effect(
                   }
                   yield* engagement.markInjected()
 
-                  lines.push(
-                    "",
-                    EngagementSchema.toOODAContext(state, recentChanges),
-                    "",
-                    "Current engagement state:",
-                    EngagementSchema.toCompactContext(state),
-                  )
+                  lines.push("", EngagementSchema.toOODAContext(state, recentChanges))
+
+                  const shouldInjectFull = step <= 1 || step % 8 === 0 || recentChanges.length > 15
+                  if (shouldInjectFull) {
+                    lines.push(
+                      "",
+                      "Current engagement state:",
+                      EngagementSchema.toCompactContext(state, 20, { excludeOODAFields: true }),
+                    )
+                  } else {
+                    const ss = EngagementSchema.summary(state)
+                    lines.push(
+                      "",
+                      `State summary (full state injected every 8 turns, use state_query for details):`,
+                      `  hosts:${ss.hosts_discovered} compromised:${ss.hosts_compromised} vulns:${ss.vulnerabilities} creds:${ss.credentials} flags:${ss.flags} phase:${ss.current_phase}`,
+                    )
+                  }
                   const taskGraph = yield* engagement.getTaskGraph()
                   const taskEntries = Object.values(taskGraph)
                   if (taskEntries.length > 0) {
@@ -1355,6 +1365,28 @@ const layer = Layer.effect(
                     }
                     lines.push("</task-graph>")
                   }
+                  const decisions = yield* engagement.getDecisions(10)
+                  if (decisions.length > 0) {
+                    const failed = decisions.filter((dec) => dec.outcome === "failed")
+                    const succeeded = decisions.filter((dec) => dec.outcome === "successful")
+                    lines.push("")
+                    lines.push("<decision-history>")
+                    lines.push(`  Recent decisions: ${decisions.length} (${succeeded.length} successful, ${failed.length} failed)`)
+                    for (const dec of decisions.slice(-5)) {
+                      const outcomeStr = dec.outcome ? ` [${dec.outcome}]` : " [pending]"
+                      lines.push(`  [${dec.phase}]${outcomeStr} ${dec.decision}`)
+                      if (dec.outcome === "failed" && dec.outcome_notes) {
+                        lines.push(`    → Failure: ${dec.outcome_notes}`)
+                      }
+                    }
+                    if (failed.length >= 3) {
+                      const recentFailedVectors = failed.slice(-3).map((d) => d.decision).join("; ")
+                      lines.push(`  ⚠ ${failed.length} failures detected. Avoid repeating: ${recentFailedVectors}`)
+                      lines.push("  Consider spawning critic subagent to analyze blockers or switching attack vector.")
+                    }
+                    lines.push("</decision-history>")
+                  }
+
                   const criticReminder = EngagementSchema.criticHint(state)
                   if (criticReminder) {
                     lines.push("")
@@ -1367,7 +1399,7 @@ const layer = Layer.effect(
                   }
 
                   lines.push("")
-                  lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Do not batch.")
+                  lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.")
                   lines.push("</pentest-engagement>")
                   if (state.mode === "auto" && agent.name === "pentest") {
                     lines.push("", ORCHESTRATOR_MODE)

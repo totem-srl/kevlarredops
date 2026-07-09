@@ -87,3 +87,9 @@ For each service type, run ALL relevant enumeration techniques:
 
 MANDATORY: Call `state_update` to record ALL findings — hosts, services, users, vulns, misconfigurations.
 Do this IMMEDIATELY after each enumeration step, not at the end. One state_update per finding.
+
+# MANDATORY: Parser Tools
+- After gobuster/feroxbuster/ffuf → MUST call `gobuster_parse` with output RIGHT NOW
+- After netexec/crackmapexec → MUST call `cme_parse` with output RIGHT NOW
+- After nmap service detection → MUST call `nmap_parse` with output RIGHT NOW
+- NEVER manually parse tool output when a parser tool exists — parsers auto-update state

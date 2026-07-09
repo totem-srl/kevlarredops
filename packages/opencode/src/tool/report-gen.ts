@@ -149,11 +149,23 @@ function generateFindings(state: EngagementSchema.State): string {
       const portStr = vuln.service_port !== undefined ? `:${vuln.service_port}` : ""
       lines.push(`- **Host**: ${hostIp}${portStr}`)
       lines.push(`- **Status**: ${vuln.status ?? "suspected"}`)
+      if (vuln.confidence !== undefined) lines.push(`- **Confidence**: ${(vuln.confidence * 100).toFixed(0)}%`)
       if (vuln.description) lines.push(`- **Description**: ${vuln.description}`)
       if (vuln.evidence) lines.push(`- **Evidence**: ${vuln.evidence}`)
       if (vuln.mitre_attack_id) lines.push(`- **MITRE ATT&CK**: ${vuln.mitre_attack_id}`)
       const refs = vuln.references ?? []
       if (refs.length > 0) lines.push(`- **References**: ${refs.join(", ")}`)
+      const items = vuln.evidence_items ?? []
+      if (items.length > 0) {
+        lines.push("- **Evidence Chain**:")
+        for (const item of items) {
+          const agent = item.source_agent ? ` (${item.source_agent})` : ""
+          const status = item.verification_status ? ` [${item.verification_status}]` : ""
+          const attempt = item.attempt_number !== undefined ? ` attempt#${item.attempt_number}` : ""
+          lines.push(`  - \`${item.tool}\`${agent}${attempt}${status}: ${item.command ?? "(no command)"}`)
+          if (item.reasoning) lines.push(`    Reasoning: ${item.reasoning}`)
+        }
+      }
       lines.push("")
     }
   }

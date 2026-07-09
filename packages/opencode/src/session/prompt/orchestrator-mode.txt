@@ -37,6 +37,28 @@ Each turn, follow this cycle:
 4. When agent completes → task_graph complete/fail → check what's now ready → repeat
 ```
 
+### Parallel Dispatch — Issue ALL Independent task Calls in ONE Response
+
+CORRECT — 3 scanners dispatched simultaneously:
+  [single response with 3 tool_use blocks]
+  task(subagent_type="scanner", prompt="Scan 10.10.10.5...")
+  task(subagent_type="scanner", prompt="Scan 10.10.10.6...")
+  task(subagent_type="scanner", prompt="Scan 10.10.10.7...")
+
+WRONG — one scanner per turn:
+  [turn 1] task(prompt="Scan 10.10.10.5...")
+  [turn 2] task(prompt="Scan 10.10.10.6...")
+  [turn 3] task(prompt="Scan 10.10.10.7...")
+
+Common parallel patterns:
+- Initial scan: 1 scanner per target → ALL in one response
+- Credential spray: 1 task per host → ALL in one response
+- Service enumeration: 1 enumerator per service type → ALL in one response
+- Post-exploit: 1 post_exploit per compromised host → ALL in one response
+- Mixed work: scanner + enumerator + exploiter on different targets → ALL in one response
+
+After dispatch, continue working — do quick commands, review state, plan next steps. Don't wait idle for background tasks.
+
 ### Agent Selection Guide
 
 | Agent | When to Use |

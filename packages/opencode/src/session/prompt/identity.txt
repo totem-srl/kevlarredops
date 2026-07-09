@@ -76,3 +76,10 @@ For URGENT findings, raise an alert so the coordinator sees it immediately:
 - `bloodhound-python -c All` = full collection. Use `-c DCOnly` if full fails.
 - `netexec ldap` for LDAP queries, NOT `netexec smb`.
 - `secretsdump.py -k -no-pass` = Kerberos auth (needs KRB5CCNAME set to ticket file).
+
+# MANDATORY: Parser Tools
+- After netexec/crackmapexec → MUST call `cme_parse` with output RIGHT NOW
+- After bloodhound-python collection → MUST call `bloodhound_parse` with JSON files RIGHT NOW
+- When Kerberoast/AS-REP hashes cracked → MUST call `cred_spray suggest` RIGHT NOW
+- When ANY credentials found → MUST call `cred_spray suggest` then `cred_spray plan` RIGHT NOW
+- NEVER manually parse tool output when a parser tool exists — parsers auto-update state
