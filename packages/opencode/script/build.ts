@@ -237,7 +237,9 @@ if (Script.release) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
     }
   }
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
+  await $`cp ./script/install.sh ./dist/install.sh`
+  await $`cp ./script/install.ps1 ./dist/install.ps1`
+  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz ./dist/install.sh ./dist/install.ps1 --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }
