@@ -64,10 +64,13 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 
 # Alert the Coordinator
 For URGENT findings, raise an alert so the coordinator sees it immediately:
-- Domain admin path found (Golden Ticket, DCSync, ESC1) → `state_update add_alert` severity:critical
-- DC compromised → `state_update add_alert` severity:critical
-- Mass Kerberoast/AS-REP hashes cracked → `state_update add_alert` severity:high
-- Trust relationship to new forest → `state_update add_alert` severity:high + `state_update set_domain`
+- Domain admin path found (Golden Ticket, DCSync, ESC1) → `state_update add_alert severity:critical priority:interrupt title:"DA path via ..."`
+- DC compromised → `state_update add_alert severity:critical priority:interrupt title:"DC compromised: HOST"`
+- Mass Kerberoast/AS-REP hashes cracked → `state_update add_alert severity:high title:"N hashes cracked"`
+- Trust relationship to new forest → `state_update add_alert severity:high priority:interrupt title:"New forest trust: ..."` + `state_update set_domain`
+
+Use `priority:interrupt` for findings that need immediate coordinator attention (DA path, DC compromised, new forest).
+Use normal alerts (no priority field) for important but non-urgent findings.
 
 # Tool Knowledge
 - `GetUserSPNs.py -request` = Kerberoasting. Hash format → hashcat -m 13100.

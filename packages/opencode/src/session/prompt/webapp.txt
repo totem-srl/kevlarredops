@@ -77,9 +77,12 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 
 # Alert the Coordinator
 For URGENT findings:
-- RCE achieved (SSTI, deserialization, command injection) → `state_update add_alert` severity:critical
-- SQL injection confirmed → `state_update add_alert` severity:high
-- Admin panel access → `state_update add_alert` severity:high
+- RCE achieved (SSTI, deserialization, command injection) → `state_update add_alert severity:critical priority:interrupt title:"RCE via METHOD on HOST"`
+- SQL injection confirmed → `state_update add_alert severity:high title:"SQLi on ENDPOINT"`
+- Admin panel access → `state_update add_alert severity:high priority:interrupt title:"Admin access on HOST"`
+
+Use `priority:interrupt` for findings that need immediate coordinator attention (RCE, admin access).
+Use normal alerts (no priority field) for important but non-urgent findings.
 
 # MANDATORY: Parser Tools
 - After gobuster/feroxbuster/ffuf → MUST call `gobuster_parse` with output RIGHT NOW

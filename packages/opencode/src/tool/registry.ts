@@ -41,7 +41,7 @@ import { SqlmapParseTool } from "./sqlmap-parse"
 import { XssDetectTool } from "./xss-detect"
 import { JwtAnalyzeTool } from "./jwt-analyze"
 import { TunnelManageTool } from "./tunnel-manage"
-import { PivotSuggestTool } from "./pivot-suggest"
+import { AttackPathSuggestTool } from "./attack-path-suggest"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import * as Truncate from "./truncate"
 import { Glob } from "@pentestcode/core/util/glob"
@@ -137,7 +137,7 @@ const layer = Layer.effect(
     const xssdetect = yield* XssDetectTool
     const jwtanalyze = yield* JwtAnalyzeTool
     const tunnelmanage = yield* TunnelManageTool
-    const pivotsuggest = yield* PivotSuggestTool
+    const attackpathsuggest = yield* AttackPathSuggestTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -258,7 +258,7 @@ const layer = Layer.effect(
           xssdetect: Tool.init(xssdetect),
           jwtanalyze: Tool.init(jwtanalyze),
           tunnelmanage: Tool.init(tunnelmanage),
-          pivotsuggest: Tool.init(pivotsuggest),
+          attackpathsuggest: Tool.init(attackpathsuggest),
         })
 
         return {
@@ -292,7 +292,7 @@ const layer = Layer.effect(
             tool.xssdetect,
             tool.jwtanalyze,
             tool.tunnelmanage,
-            tool.pivotsuggest,
+            tool.attackpathsuggest,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,

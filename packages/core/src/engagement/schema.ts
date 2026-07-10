@@ -248,10 +248,14 @@ export const DECISIONS_MAX_ENTRIES = 100
 export const AlertSeverity = Schema.Literals(["critical", "high", "medium", "info"])
 export type AlertSeverity = typeof AlertSeverity.Type
 
+export const AlertPriority = Schema.Literals(["normal", "interrupt"])
+export type AlertPriority = typeof AlertPriority.Type
+
 export const Alert = Schema.Struct({
   id: Schema.String,
   timestamp: Schema.String,
   severity: AlertSeverity,
+  priority: Schema.optional(AlertPriority),
   source_agent: Schema.optional(Schema.String),
   title: Schema.String,
   details: Schema.optional(Schema.String),
@@ -333,6 +337,22 @@ export const ChangelogEntry = Schema.Struct({
 export type ChangelogEntry = typeof ChangelogEntry.Type
 
 export const CHANGELOG_MAX_ENTRIES = 500
+
+// --- Agent Context Summaries (for context carry across subagent re-spawns) ---
+
+export const AgentContextSummary = Schema.Struct({
+  id: Schema.String,
+  agent_type: Schema.String,
+  timestamp: Schema.String,
+  task_description: Schema.String,
+  outcome: Schema.Literals(["completed", "error"]),
+  key_findings: Schema.Array(Schema.String),
+  failed_attempts: Schema.Array(Schema.String),
+  recommended_next: Schema.Array(Schema.String),
+}).annotate({ identifier: "Engagement.AgentContextSummary" })
+export type AgentContextSummary = typeof AgentContextSummary.Type
+
+export const AGENT_CONTEXT_MAX_PER_TYPE = 10
 
 export function toDiffContext(entries: ChangelogEntry[], maxEntries = 20): string | undefined {
   if (entries.length === 0) return undefined

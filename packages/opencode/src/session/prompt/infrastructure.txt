@@ -76,10 +76,13 @@ MANDATORY: Call `state_update` IMMEDIATELY after each finding — not at the end
 
 # Alert the Coordinator
 For URGENT findings, raise an alert so the coordinator sees it immediately:
-- RCE via database (xp_cmdshell, UDF, COPY TO) → `state_update add_alert` severity:critical
-- Unauthenticated access to critical service → `state_update add_alert` severity:high
-- New network segment discovered via SNMP/routing → `state_update add_alert` severity:high + `add_network_segment`
-- IPMI cipher zero (no-auth admin) → `state_update add_alert` severity:critical
+- RCE via database (xp_cmdshell, UDF, COPY TO) → `state_update add_alert severity:critical priority:interrupt title:"RCE via DB on HOST"`
+- Unauthenticated access to critical service → `state_update add_alert severity:high title:"Unauth access: SERVICE on HOST"`
+- New network segment discovered via SNMP/routing → `state_update add_alert severity:high priority:interrupt title:"New segment: CIDR"` + `add_network_segment`
+- IPMI cipher zero (no-auth admin) → `state_update add_alert severity:critical priority:interrupt title:"IPMI cipher zero on HOST"`
+
+Use `priority:interrupt` for findings that need immediate coordinator attention (RCE, new network segment, no-auth admin).
+Use normal alerts (no priority field) for important but non-urgent findings.
 
 # Track Sessions & Segments
 - DB shells (xp_cmdshell, \! in psql) → `add_live_session` session_type:"shell"

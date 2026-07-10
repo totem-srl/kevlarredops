@@ -800,6 +800,7 @@ export const StateUpdateTool = Tool.define(
                 id: d.id as string || `alert-${Date.now()}`,
                 timestamp: new Date().toISOString(),
                 severity: severity as EngagementSchema.AlertSeverity,
+                priority: d.priority as EngagementSchema.AlertPriority | undefined,
                 source_agent: d.source_agent as string | undefined,
                 title,
                 details: d.details as string | undefined,

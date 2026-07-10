@@ -76,7 +76,7 @@ Prompts in: `packages/opencode/src/session/prompt/*.txt` and `packages/opencode/
 - **Engagement schema**: `packages/core/src/engagement/schema.ts` (Effect Schema, State/Host/Vuln/Cred types)
 - **Engagement store**: `packages/core/src/engagement/store.ts` (global Ref + JSON persistence)
 - **Engagement context (V2)**: `packages/core/src/engagement/context.ts` (SystemContext source, V2 only)
-- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`, `sqlmap-parse.ts`, `xss-detect.ts`, `jwt-analyze.ts`, `tunnel-manage.ts`, `pivot-suggest.ts`
+- **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`, `sqlmap-parse.ts`, `xss-detect.ts`, `jwt-analyze.ts`, `tunnel-manage.ts`, `attack-path-suggest.ts`
 - **App runtime (V1)**: `packages/opencode/src/effect/app-runtime.ts` (LayerNode graph)
 - **Location services (V2)**: `packages/core/src/location-services.ts` (V2 layer graph)
 - **Config**: `.opencode/opencode.jsonc` (will rename to `.pentestcode/`)
@@ -224,12 +224,40 @@ bun turbo typecheck
 - [x] **Entity Relationships** (#6) — `Relationship` schema with typed edges: EXPLOITED_VIA, CREDENTIAL_FROM, REACHABLE_FROM, TRUSTS, MEMBER_OF, ADMIN_OF, PIVOT_TO, AUTHENTICATES_TO, LATERAL_MOVE, CONTROLS. `relationships[]` on State. Store methods: `addRelationship()` (dedup by source+type+target), `getRelationships()` (filter by entity_id or rel_type), `deleteRelationship()`. Tools: `state_update add_relationship/delete_relationship`, `state_query relationships`. Auto-created by parsers: nmap→REACHABLE_FROM, cme→AUTHENTICATES_TO/ADMIN_OF, bloodhound→MEMBER_OF/ADMIN_OF/TRUSTS. Displayed in compact context.
 - [x] **Phase Quality Gates** (#7) — `evaluateQualityGate()` in phase-control.ts checks coverage metrics per phase before transition. Missing items block transition; warnings allow with notice. `force:true` parameter skips all gates. Gates: recon (hosts+services), enumeration (version coverage), vuln_assess (confirmed vulns, unvalidated check), exploitation (compromised hosts), post_exploit (creds, lateral coverage, objectives).
 
+### Wave 3 Completion (2026-07-10)
+
+#### Attack Path Derivation (#11)
+- [x] `attack_path_suggest` tool (renamed from `pivot_suggest`): complete rewrite from 322→1140 lines
+- [x] Cost model: `EDGE_BASE_COSTS` map for all 10 relationship types + default fallback (35) for unknown types
+- [x] Modifiers: credential/vuln confidence, temporal penalty (expired→Infinity), live session bonus (×0.7), OPSEC noise (+0/+10/+20)
+- [x] Dijkstra + Yen's K-Shortest Paths (K=3) replaces BFS
+- [x] Entity projection: credential→host, user→DC, domain trust→DC-DC edges
+- [x] Segment-aware synthetic edges (not O(n²) complete graph anymore)
+- [x] `resolveObjectiveTargets()`: "domain controller"/CIDR/IP/keyword → host IPs
+- [x] Inline MinHeap, no external deps
+
+#### Agent Context Carry (#12)
+- [x] `AgentContextSummary` schema in schema.ts (id, agent_type, timestamp, findings, failures, next steps)
+- [x] `agent-contexts.json` persistence in store.ts (cap 10 per agent type)
+- [x] `buildContextSummary()` in task.ts: heuristic parser extracts findings/failures/next from subagent output
+- [x] `formatPriorContext()`: XML `<prior-agent-context>` block injected into fresh subagent prompts
+- [x] Auto-save on completion (both background and foreground paths)
+
+#### Inter-Agent Communication
+- [x] `AlertPriority` schema: `"normal" | "interrupt"` on Alert
+- [x] `interruptQueueRef` in store.ts: accumulates interrupt alerts, `drainInterruptAlerts()` to consume
+- [x] Watcher fiber in task.ts: polls every 2s during background subagent, injects into coordinator
+- [x] prompt.ts: drains interrupt queue at top of engagement context injection
+- [x] state-update.ts: accepts `priority` field in `add_alert`
+- [x] All 7 subagent prompts updated with interrupt alert instructions
+
 ### Storage Layout (updated)
 ```
 ~/.pentestcode/engagements/<name>/
 ├── state.json          # core (compact) — now includes relationships[]
 ├── changelog.json      # deletable, retention 500
 ├── decisions.json      # Wave 3 — deletable, retention 100
+├── agent-contexts.json # Wave 3 — deletable, retention 10 per agent type
 └── evidence/           # Wave 3 — deletable folder, files per vuln_id
 ```
 
@@ -258,7 +286,7 @@ bun turbo typecheck
 
 ### Gap 4: Network Pivoting & Tunnel Tools (2 new tools)
 - [x] **tunnel_manage** — plan tunnel commands (SSH/chisel/ligolo), register/list/remove live sessions in state
-- [x] **pivot_suggest** — BFS path-finding over relationship graph, strategic target scoring (DCs prioritized), network segment awareness
+- [x] **attack_path_suggest** (renamed from pivot_suggest) — cost-based Dijkstra + Yen's K-Shortest path-finding, all 10 relationship types, entity projection, objective targeting
 - [x] Both registered in registry.ts, permissions granted to pentest/post_exploit/infrastructure agents
 
 ### Gap 5: Benchmark Infrastructure
@@ -285,15 +313,15 @@ bun turbo typecheck
 - [x] **Decision Memory** (#8) — decisions.json fully implemented (schema, store, CRUD, state_update/state_query). Context injection into prompt added.
 - [x] **Alert Queue** (#9) — fully implemented (schema, store, TTL, max 50, OODA display, state_update/state_query).
 - [x] **OODA Structured Reasoning** (#10) — `toOODAContext()` fully implemented (changes, coverage, gaps, alerts, sessions, segments, tasks, objectives).
-- [ ] **Attack Path Derivation** (#11) — `pivot_suggest` provides BFS over relationships. Full cost-based optimization with scoring still TODO. ~2-3 days.
-- [x] **Parallel Subagent Improvements** (#12) — parallel dispatch examples + anti-patterns in orchestrator-mode.txt and pentest.txt. Agent context carry on re-spawn still TODO.
+- [x] **Attack Path Derivation** (#11) — `attack_path_suggest` tool: Dijkstra + Yen's K-Shortest (K=3), cost model with 10 relationship types, credential/vuln confidence, temporal validity, OPSEC scoring, entity projection (cred→host, user→DC, domain trust→DC-DC), segment-aware synthetic edges, objective targeting. Renamed from `pivot_suggest`.
+- [x] **Parallel Subagent Improvements** (#12) — parallel dispatch examples + anti-patterns in orchestrator-mode.txt and pentest.txt. Agent context carry implemented: `agent-contexts.json` persists per-agent-type summaries (findings, failures, next steps), auto-injected into fresh subagent instances.
 
 ### Agent Quality (from real Standoff365 testing)
 - [x] ~~Scope guard on bash tool~~ — CANCELLED per Zhangir's decision
 - [x] Tool knowledge in prompts — mandatory parser workflow added to all agent prompts. Parser tools now MUST be used after their corresponding bash commands. Additional tool-specific knowledge can be added as issues surface.
-- [ ] Inter-agent communication — subagents run in isolation, can't signal coordinator mid-run. Need pub/sub or priority message passing for urgent findings (e.g. scanner finds DC → coordinator should know immediately).
+- [x] Inter-agent communication — interrupt alerts (`priority: "interrupt"` on alerts). Subagents raise interrupt for critical findings (DC found, admin creds, RCE). Watcher fiber in task.ts polls every 2s, injects into coordinator via `inject()`. Prompt.ts drains interrupt queue on every turn. All subagent prompts updated with interrupt alert instructions.
 - [x] Session/shell tracking — `LiveSession` schema + `tunnel_manage` tool + `live_sessions` in OODA context. Agents can now register/track/remove tunnels and shells.
-- [x] Network segmentation model — `NetworkSegment` schema + `pivot_suggest` tool. VLANs, reachable networks, pivot hosts tracked in state and used for path suggestions.
+- [x] Network segmentation model — `NetworkSegment` schema + `attack_path_suggest` tool. VLANs, reachable networks, pivot hosts tracked in state and used for path suggestions.
 
 ### Slash Commands
 - [ ] `/playbook` — load and follow a playbook interactively

@@ -49,6 +49,10 @@ Do NOT just return text — update engagement state FIRST, then summarize findin
 - DO NOT combine `-p-` with `-sV -sC` — too slow. Scan all ports first, then service detect on open ones.
 - nuclei: use `-j` for JSON output → then `nuclei_parse` for auto state update.
 - For critical/high findings, raise an alert: `state_update add_alert` severity:high so the coordinator reprioritizes.
+- For CRITICAL findings needing immediate coordinator attention, use interrupt priority:
+  `state_update add_alert severity:critical priority:interrupt title:"..." details:"..."`
+  Use interrupt for: domain controller discovered, critical RCE found, new network segment reachable.
+  Use normal alerts (no priority field) for important but non-urgent findings.
 
 # MANDATORY Parser Tools
 - After EVERY nmap scan → MUST call `nmap_parse` RIGHT NOW

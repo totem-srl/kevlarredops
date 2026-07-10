@@ -1312,9 +1312,25 @@ const layer = Layer.effect(
                   const transitionHint = phaseTransitionHint(state)
                   const lines = [
                     "<pentest-engagement>",
-                    `  Phase: ${state.current_phase}`,
-                    `  Mode: ${state.mode}`,
                   ]
+
+                  // Drain interrupt alerts for immediate visibility
+                  const interruptAlerts = yield* engagement.drainInterruptAlerts()
+                  if (interruptAlerts.length > 0) {
+                    lines.push("")
+                    lines.push("<INTERRUPT-ALERTS>")
+                    lines.push("CRITICAL: The following alerts require IMMEDIATE attention. Reprioritize current work.")
+                    for (const a of interruptAlerts) {
+                      lines.push(`  [${a.severity.toUpperCase()}] ${a.title}${a.host_ip ? ` on ${a.host_ip}` : ""}`)
+                      if (a.details) lines.push(`    ${a.details}`)
+                      if (a.source_agent) lines.push(`    Source: ${a.source_agent}`)
+                    }
+                    lines.push("</INTERRUPT-ALERTS>")
+                    lines.push("")
+                  }
+
+                  lines.push(`  Phase: ${state.current_phase}`)
+                  lines.push(`  Mode: ${state.mode}`)
                   if (modeDirective) lines.push("", modeDirective)
                   if (transitionHint) lines.push("", transitionHint)
 

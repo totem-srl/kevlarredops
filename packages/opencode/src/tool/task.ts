@@ -15,6 +15,7 @@ import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@pentestcode/core/database/database"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -76,6 +77,90 @@ function renderOutput(input: {
     input.text,
     `</${tag}>`,
     "</task>",
+  ].join("\n")
+}
+
+function buildContextSummary(
+  params: { description: string; subagent_type: string },
+  sessionID: string,
+  outcome: "completed" | "error",
+  text: string,
+): EngagementSchema.AgentContextSummary {
+  const findings: string[] = []
+  const failures: string[] = []
+  const next: string[] = []
+
+  for (const line of text.split("\n")) {
+    const lower = line.toLowerCase().trim()
+    if (!lower) continue
+    if (
+      lower.includes("found") ||
+      lower.includes("discovered") ||
+      lower.includes("identified") ||
+      lower.includes("confirmed")
+    ) {
+      findings.push(line.trim().slice(0, 200))
+    } else if (
+      lower.includes("failed") ||
+      lower.includes("error") ||
+      lower.includes("denied") ||
+      lower.includes("timeout")
+    ) {
+      failures.push(line.trim().slice(0, 200))
+    } else if (
+      lower.includes("recommend") ||
+      lower.includes("next") ||
+      lower.includes("should") ||
+      lower.includes("suggest")
+    ) {
+      next.push(line.trim().slice(0, 200))
+    }
+  }
+
+  // Fall back to truncation if no heuristic matches
+  if (findings.length === 0 && failures.length === 0 && next.length === 0) {
+    findings.push(text.slice(0, 500))
+  }
+
+  return {
+    id: crypto.randomUUID().slice(0, 8),
+    agent_type: params.subagent_type,
+    timestamp: new Date().toISOString(),
+    task_description: params.description,
+    outcome,
+    key_findings: findings.slice(0, 10),
+    failed_attempts: failures.slice(0, 10),
+    recommended_next: next.slice(0, 10),
+  }
+}
+
+function formatPriorContext(contexts: EngagementSchema.AgentContextSummary[]): string {
+  const lines: string[] = [`<prior-agent-context agent_type="${contexts[0]?.agent_type ?? "unknown"}">`]
+  for (const ctx of contexts) {
+    lines.push(`  <run time="${ctx.timestamp}" outcome="${ctx.outcome}" task="${ctx.task_description}">`)
+    if (ctx.key_findings.length > 0) {
+      lines.push(`    Findings: ${ctx.key_findings.join("; ")}`)
+    }
+    if (ctx.failed_attempts.length > 0) {
+      lines.push(`    Failed: ${ctx.failed_attempts.join("; ")}`)
+    }
+    if (ctx.recommended_next.length > 0) {
+      lines.push(`    Next: ${ctx.recommended_next.join("; ")}`)
+    }
+    lines.push(`  </run>`)
+  }
+  lines.push(`</prior-agent-context>`)
+  return lines.join("\n")
+}
+
+function formatInterruptAlert(alert: EngagementSchema.Alert): string {
+  return [
+    `<interrupt-alert source="${alert.source_agent ?? "unknown"}" severity="${alert.severity}">`,
+    `URGENT: ${alert.title}`,
+    ...(alert.host_ip ? [`Host: ${alert.host_ip}`] : []),
+    ...(alert.details ? [alert.details] : []),
+    `This alert was raised by a running subagent and requires immediate attention.`,
+    `</interrupt-alert>`,
   ].join("\n")
 }
 
@@ -186,8 +271,15 @@ export const TaskTool = Tool.define(
       const ops = ctx.extra?.promptOps as TaskPromptOps
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
+      // Agent Context Carry: inject prior context from same-type agents on fresh spawn
+      const priorContexts = yield* engagementStore.getAgentContexts(params.subagent_type, 5)
+      let augmentedPrompt = params.prompt
+      if (priorContexts.length > 0 && !params.task_id) {
+        augmentedPrompt = formatPriorContext(priorContexts) + "\n\n" + params.prompt
+      }
+
       const runTask = Effect.fn("TaskTool.runTask")(function* () {
-        const parts = yield* ops.resolvePromptParts(params.prompt)
+        const parts = yield* ops.resolvePromptParts(augmentedPrompt)
         const result = yield* ops.prompt({
           messageID: MessageID.ascending(),
           sessionID: nextSession.id,
@@ -203,7 +295,7 @@ export const TaskTool = Tool.define(
       })
 
       const inject = Effect.fn("TaskTool.injectBackgroundResult")(function* (
-        state: "completed" | "error",
+        state: "running" | "completed" | "error",
         text: string,
       ) {
         const currentParent = yield* sessions.get(ctx.sessionID)
@@ -222,7 +314,9 @@ export const TaskTool = Tool.define(
                   summary:
                     state === "completed"
                       ? `Background task completed: ${params.description}`
-                      : `Background task failed: ${params.description}`,
+                      : state === "error"
+                        ? `Background task failed: ${params.description}`
+                        : `Interrupt alert for: ${params.description}`,
                   text,
                 }),
               },
@@ -233,11 +327,21 @@ export const TaskTool = Tool.define(
 
       const notify = Effect.fn("TaskTool.notifyBackgroundResult")(function* (jobID: string) {
         yield* background.wait({ id: jobID }).pipe(
-          Effect.flatMap((result) => {
-            if (result.info?.status === "completed") return inject("completed", result.info.output ?? "")
-            if (result.info?.status === "error") return inject("error", result.info.error ?? "")
-            return Effect.void
-          }),
+          Effect.flatMap((result) =>
+            Effect.gen(function* () {
+              if (result.info?.status === "completed") {
+                const text = result.info.output ?? ""
+                const ctxSummary = buildContextSummary(params, nextSession.id, "completed", text)
+                yield* engagementStore.addAgentContext(ctxSummary)
+                yield* inject("completed", text)
+              } else if (result.info?.status === "error") {
+                const text = result.info.error ?? ""
+                const ctxSummary = buildContextSummary(params, nextSession.id, "error", text)
+                yield* engagementStore.addAgentContext(ctxSummary)
+                yield* inject("error", text)
+              }
+            }),
+          ),
           Effect.forkIn(scope, { startImmediately: true }),
         )
       })
@@ -293,6 +397,16 @@ export const TaskTool = Tool.define(
 
       if (runInBackground) {
         yield* notify(info.id)
+        // Fork interrupt alert watcher for background subagent
+        yield* Effect.gen(function* () {
+          while (true) {
+            yield* Effect.sleep("2 seconds")
+            const alerts = yield* engagementStore.drainInterruptAlerts()
+            for (const alert of alerts) {
+              yield* inject("running", formatInterruptAlert(alert))
+            }
+          }
+        }).pipe(Effect.interruptible, Effect.forkIn(scope, { startImmediately: true }))
         return backgroundResult()
       }
 
@@ -314,12 +428,20 @@ export const TaskTool = Tool.define(
               background.waitForPromotion(nextSession.id),
             )
             if (result?.metadata?.background === true) return backgroundResult()
-            if (result?.status === "error") return yield* Effect.fail(new Error(result.error ?? "Task failed"))
+            if (result?.status === "error") {
+              const errText = result.error ?? "Task failed"
+              const ctxSummary = buildContextSummary(params, nextSession.id, "error", errText)
+              yield* engagementStore.addAgentContext(ctxSummary)
+              return yield* Effect.fail(new Error(errText))
+            }
             if (result?.status === "cancelled") return yield* Effect.fail(new Error("Task cancelled"))
+            const outputText = result?.output ?? ""
+            const ctxSummary = buildContextSummary(params, nextSession.id, "completed", outputText)
+            yield* engagementStore.addAgentContext(ctxSummary)
             return {
               title: params.description,
               metadata,
-              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: result?.output ?? "" }),
+              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: outputText }),
             }
           }),
         (_, exit) =>

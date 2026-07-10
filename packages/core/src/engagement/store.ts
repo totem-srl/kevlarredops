@@ -12,6 +12,7 @@ const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
 const LAST_FILE = ".last"
 const CHANGELOG_FILE = "changelog.json"
 const DECISIONS_FILE = "decisions.json"
+const AGENT_CONTEXTS_FILE = "agent-contexts.json"
 
 function mergeServices(
   existing: readonly EngagementSchema.Service[],
@@ -77,6 +78,12 @@ export interface Interface {
   readonly addNetworkSegment: (segment: EngagementSchema.NetworkSegment) => Effect.Effect<void>
   readonly updateNetworkSegment: (id: string, patch: Record<string, unknown>) => Effect.Effect<boolean>
   readonly removeNetworkSegment: (id: string) => Effect.Effect<boolean>
+  // Agent Context Carry
+  readonly addAgentContext: (summary: EngagementSchema.AgentContextSummary) => Effect.Effect<void>
+  readonly getAgentContexts: (agentType: string, limit?: number) => Effect.Effect<EngagementSchema.AgentContextSummary[]>
+  // Interrupt Alerts
+  readonly drainInterruptAlerts: () => Effect.Effect<EngagementSchema.Alert[]>
+  readonly hasInterruptAlerts: () => Effect.Effect<boolean>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -93,6 +100,10 @@ function decisionsFilePath(name: string): string {
   return path.join(ENGAGEMENTS_DIR, name, DECISIONS_FILE)
 }
 
+function agentContextsFilePath(name: string): string {
+  return path.join(ENGAGEMENTS_DIR, name, AGENT_CONTEXTS_FILE)
+}
+
 function lastFilePath(): string {
   return path.join(ENGAGEMENTS_DIR, LAST_FILE)
 }
@@ -106,6 +117,8 @@ const layer = Layer.effect(
     const stateRef = yield* Ref.make<EngagementSchema.State | undefined>(undefined)
     const changelogRef = yield* Ref.make<EngagementSchema.ChangelogEntry[]>([])
     const decisionsRef = yield* Ref.make<EngagementSchema.Decision[]>([])
+    const agentContextsRef = yield* Ref.make<Record<string, EngagementSchema.AgentContextSummary[]>>({})
+    const interruptQueueRef = yield* Ref.make<EngagementSchema.Alert[]>([])
     const lastInjectedRef = yield* Ref.make<string | undefined>(undefined)
 
     const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
@@ -169,6 +182,28 @@ const layer = Layer.effect(
       }
     }
 
+    const persistAgentContexts = (name: string, contexts: Record<string, EngagementSchema.AgentContextSummary[]>) => {
+      try {
+        const filePath = agentContextsFilePath(name)
+        const dir = path.dirname(filePath)
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        fs.writeFileSync(filePath, JSON.stringify(contexts, undefined, 2), { encoding: "utf-8", mode: 0o600 })
+      } catch {
+        // agent contexts persistence is best-effort
+      }
+    }
+
+    const loadAgentContexts = (name: string): Record<string, EngagementSchema.AgentContextSummary[]> => {
+      try {
+        const filePath = agentContextsFilePath(name)
+        if (!fs.existsSync(filePath)) return {}
+        const raw = fs.readFileSync(filePath, "utf-8")
+        return JSON.parse(raw) as Record<string, EngagementSchema.AgentContextSummary[]>
+      } catch {
+        return {}
+      }
+    }
+
     const persist = (state: EngagementSchema.State) =>
       Effect.sync(() => {
         const filePath = stateFilePath(state.name)
@@ -210,6 +245,8 @@ const layer = Layer.effect(
         persistChangelogEntries(updated.name, entries)
         const decisions = yield* Ref.get(decisionsRef)
         if (decisions.length > 0) persistDecisions(updated.name, decisions)
+        const contexts = yield* Ref.get(agentContextsRef)
+        if (Object.keys(contexts).length > 0) persistAgentContexts(updated.name, contexts)
       }),
 
       create: Effect.fn("EngagementStore.create")(function* (name) {
@@ -231,6 +268,8 @@ const layer = Layer.effect(
         yield* Ref.set(stateRef, state)
         yield* Ref.set(changelogRef, [])
         yield* Ref.set(decisionsRef, [])
+        yield* Ref.set(agentContextsRef, {})
+        yield* Ref.set(interruptQueueRef, [])
         yield* persist(state)
         yield* logChange("create_engagement", "engagement", state.id, `Created engagement "${name}"`)
         return state
@@ -242,6 +281,8 @@ const layer = Layer.effect(
           yield* Ref.set(stateRef, state)
           yield* Ref.set(changelogRef, loadChangelog(name))
           yield* Ref.set(decisionsRef, loadDecisions(name))
+          yield* Ref.set(agentContextsRef, loadAgentContexts(name))
+          yield* Ref.set(interruptQueueRef, [])
         }
         return state
       }),
@@ -559,7 +600,11 @@ const layer = Layer.effect(
           ? [...active.slice(1), alert]
           : [...active, alert]
         yield* Ref.set(stateRef, { ...current, alerts: capped })
-        yield* logChange("add_alert", "alert", alert.id, `[${alert.severity.toUpperCase()}] ${alert.title}${alert.source_agent ? ` from:${alert.source_agent}` : ""}`)
+        if (alert.priority === "interrupt") {
+          const queue = yield* Ref.get(interruptQueueRef)
+          yield* Ref.set(interruptQueueRef, [...queue, alert])
+        }
+        yield* logChange("add_alert", "alert", alert.id, `[${alert.severity.toUpperCase()}]${alert.priority === "interrupt" ? " [INTERRUPT]" : ""} ${alert.title}${alert.source_agent ? ` from:${alert.source_agent}` : ""}`)
       }),
 
       acknowledgeAlert: Effect.fn("EngagementStore.acknowledgeAlert")(function* (id) {
@@ -654,6 +699,40 @@ const layer = Layer.effect(
         yield* Ref.set(stateRef, { ...current, network_segments: filtered })
         yield* logChange("remove_segment", "network_segment", id, `Segment ${id} removed`)
         return true
+      }),
+
+      // --- Agent Context Carry ---
+      addAgentContext: Effect.fn("EngagementStore.addAgentContext")(function* (summary) {
+        const all = yield* Ref.get(agentContextsRef)
+        const existing = all[summary.agent_type] ?? []
+        const updated = [...existing, summary]
+        const trimmed = updated.length > EngagementSchema.AGENT_CONTEXT_MAX_PER_TYPE
+          ? updated.slice(updated.length - EngagementSchema.AGENT_CONTEXT_MAX_PER_TYPE)
+          : updated
+        const newAll = { ...all, [summary.agent_type]: trimmed }
+        yield* Ref.set(agentContextsRef, newAll)
+        const state = yield* Ref.get(stateRef)
+        if (state) persistAgentContexts(state.name, newAll)
+      }),
+
+      getAgentContexts: Effect.fn("EngagementStore.getAgentContexts")(function* (agentType, limit) {
+        const all = yield* Ref.get(agentContextsRef)
+        const entries = all[agentType] ?? []
+        return limit ? entries.slice(-limit) : entries
+      }),
+
+      // --- Interrupt Alerts ---
+      drainInterruptAlerts: Effect.fn("EngagementStore.drainInterruptAlerts")(function* () {
+        const alerts = yield* Ref.get(interruptQueueRef)
+        if (alerts.length > 0) {
+          yield* Ref.set(interruptQueueRef, [])
+        }
+        return alerts
+      }),
+
+      hasInterruptAlerts: Effect.fn("EngagementStore.hasInterruptAlerts")(function* () {
+        const alerts = yield* Ref.get(interruptQueueRef)
+        return alerts.length > 0
       }),
     })
   }),

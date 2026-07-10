@@ -88,6 +88,12 @@ For each service type, run ALL relevant enumeration techniques:
 MANDATORY: Call `state_update` to record ALL findings — hosts, services, users, vulns, misconfigurations.
 Do this IMMEDIATELY after each enumeration step, not at the end. One state_update per finding.
 
+# Interrupt Alerts
+For CRITICAL findings that need immediate coordinator attention, raise an INTERRUPT alert:
+  `state_update add_alert severity:critical priority:interrupt title:"..." details:"..."`
+Use interrupt priority for: admin credentials found, critical service misconfiguration, new domain/forest discovered.
+Use normal alerts (no priority field) for important but non-urgent findings.
+
 # MANDATORY: Parser Tools
 - After gobuster/feroxbuster/ffuf → MUST call `gobuster_parse` with output RIGHT NOW
 - After netexec/crackmapexec → MUST call `cme_parse` with output RIGHT NOW
