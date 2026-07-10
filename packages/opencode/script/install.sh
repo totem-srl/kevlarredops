@@ -18,12 +18,12 @@ main() {
 
   artifact="${BINARY}-${platform}-${arch}${variant}"
 
-  if [ "$platform" = "windows" ]; then
-    ext="zip"
-    need_cmd unzip
-  else
+  if [ "$platform" = "linux" ]; then
     ext="tar.gz"
     need_cmd tar
+  else
+    ext="zip"
+    need_cmd unzip
   fi
 
   url="https://github.com/${REPO}/releases/download/v${version}/${artifact}.${ext}"
