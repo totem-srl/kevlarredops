@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FSUtil } from "@pentestcode/core/fs-util"
@@ -396,6 +397,7 @@ export const BloodHoundParseTool = Tool.define(
           let totalFindings = 0
           let hostsAdded = 0
           let vulnsAdded = 0
+          const oosHosts: string[] = []
 
           // ---------- Process by type ----------
 
@@ -431,7 +433,19 @@ export const BloodHoundParseTool = Tool.define(
 
             if (shouldUpdate) {
               const state = yield* store.get()
-              for (const c of enabled) {
+              const scopeEnabled = enabled.filter((c) => {
+                if (!c.name) return false
+                const hostKey = c.name.toUpperCase()
+                if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                  const result = ScopeMatcher.checkScope(hostKey, state.scope)
+                  if (!result.inScope && c.name) {
+                    const byName = ScopeMatcher.checkScope(c.name, state.scope)
+                    if (!byName.inScope) { oosHosts.push(c.name); return false }
+                  }
+                }
+                return true
+              })
+              for (const c of scopeEnabled) {
                 if (!c.name) continue
                 const hostKey = c.name.toUpperCase()
                 const domainName = c.domain ?? c.name.split(".").slice(1).join(".")
@@ -882,8 +896,12 @@ export const BloodHoundParseTool = Tool.define(
             if (updatedState) yield* store.save(updatedState)
           }
 
-          const output = formatOutput(summaries, shouldUpdate)
+          let output = formatOutput(summaries, shouldUpdate)
           const totalItems = summaries.reduce((s, x) => s + x.totalItems, 0)
+
+          if (oosHosts.length > 0) {
+            output += `\n[SCOPE] Filtered ${oosHosts.length} out-of-scope computer(s): ${oosHosts.join(", ")}. Not added to engagement state.`
+          }
 
           return {
             title: `bloodhound: ${dataType}, ${totalItems} items, ${totalFindings} findings, ${vulnsAdded} vulns`,

@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FSUtil } from "@pentestcode/core/fs-util"
@@ -184,9 +185,19 @@ export const NucleiParseTool = Tool.define(
             }
           }
 
+          const oosHosts: string[] = []
+
           if (shouldUpdate) {
             const state = yield* store.get()
-            for (const f of findings) {
+            const inScopeFindings = findings.filter((f) => {
+              if (!f.ip) return true
+              if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                const result = ScopeMatcher.checkScope(f.ip, state.scope)
+                if (!result.inScope) { oosHosts.push(f.ip); return false }
+              }
+              return true
+            })
+            for (const f of inScopeFindings) {
               if (!f.ip) continue
 
               yield* store.addHost(f.ip, { ip: f.ip })
@@ -241,6 +252,11 @@ export const NucleiParseTool = Tool.define(
           }
 
           let output = formatOutput(findings, shouldUpdate)
+
+          if (oosHosts.length > 0) {
+            const unique = [...new Set(oosHosts)]
+            output += `\n\n[SCOPE] Filtered ${unique.length} out-of-scope finding(s) by host: ${unique.join(", ")}. Not added to engagement state.`
+          }
 
           if (shouldUpdate && findings.length > 0) {
             const highSev = findings.filter((f) => f.severity === "critical" || f.severity === "high")

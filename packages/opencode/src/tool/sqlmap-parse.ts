@@ -2,6 +2,7 @@ import * as nodeFs from "node:fs"
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import type { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import DESCRIPTION from "./sqlmap-parse.txt"
@@ -283,9 +284,19 @@ export const SqlmapParseTool = Tool.define(
             }
           }
 
+          const oosHosts: string[] = []
+
           if (shouldUpdate) {
             const state = yield* store.get()
-            for (const f of findings) {
+            const inScopeFindings = findings.filter((f) => {
+              if (!f.ip || f.ip === "unknown") return true
+              if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                const result = ScopeMatcher.checkScope(f.ip, state.scope)
+                if (!result.inScope) { oosHosts.push(f.ip); return false }
+              }
+              return true
+            })
+            for (const f of inScopeFindings) {
               if (!f.ip || f.ip === "unknown") continue
 
               yield* store.addHost(f.ip, { ip: f.ip })
@@ -337,6 +348,11 @@ export const SqlmapParseTool = Tool.define(
           }
 
           let output = formatOutput(findings, shouldUpdate)
+
+          if (oosHosts.length > 0) {
+            const unique = [...new Set(oosHosts)]
+            output += `\n\n[SCOPE] Filtered ${unique.length} out-of-scope host(s): ${unique.join(", ")}. Not added to engagement state.`
+          }
 
           if (shouldUpdate && findings.length > 0) {
             output += `\n\n[Auto-critic] ${findings.length} SQL injection finding(s) detected. Spawn "critic" subagent to verify exploitability and rule out false positives.`

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import type { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import DESCRIPTION from "./cred-spray.txt"
 import * as Tool from "./tool"
 
@@ -65,6 +66,24 @@ const PORT_SERVICE_MAP: Record<number, string> = {
   8443: "web",
 }
 
+const DEFAULT_PORTS: Record<string, number> = {
+  smb: 445,
+  ssh: 22,
+  ftp: 21,
+  rdp: 3389,
+  winrm: 5985,
+  mssql: 1433,
+  mysql: 3306,
+  postgresql: 5432,
+  web: 80,
+}
+
+const DOMAIN_AUTH_SERVICES = new Set(["smb", "winrm", "rdp", "mssql"])
+
+export function shq(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'"
+}
+
 function resolveService(svc: EngagementSchema.Service): string | undefined {
   if (svc.service) {
     const mapped = SERVICE_PORT_MAP[svc.service.toLowerCase()]
@@ -73,41 +92,59 @@ function resolveService(svc: EngagementSchema.Service): string | undefined {
   return PORT_SERVICE_MAP[svc.port]
 }
 
-function buildCommand(service: string, host: string, username: string, value: string, isHash: boolean): string {
+export function buildCommand(service: string, host: string, port: number, username: string, value: string, isHash: boolean): string {
   const u = username
+  const h = shq(host)
+  const uq = shq(u)
+  const vq = shq(value)
+  const defaultPort = DEFAULT_PORTS[service] ?? 0
+  const nonStandard = port !== defaultPort
+
   switch (service) {
-    case "smb":
+    case "smb": {
+      const pf = nonStandard ? ` --port ${port}` : ""
       return isHash
-        ? `netexec smb ${host} -u '${u}' -H '${value}'`
-        : `netexec smb ${host} -u '${u}' -p '${value}'`
-    case "winrm":
+        ? `netexec smb ${h} -u ${uq} -H ${vq}${pf}`
+        : `netexec smb ${h} -u ${uq} -p ${vq}${pf}`
+    }
+    case "winrm": {
+      const pf = nonStandard ? ` --port ${port}` : ""
       return isHash
-        ? `netexec winrm ${host} -u '${u}' -H '${value}'`
-        : `netexec winrm ${host} -u '${u}' -p '${value}'`
-    case "rdp":
+        ? `netexec winrm ${h} -u ${uq} -H ${vq}${pf}`
+        : `netexec winrm ${h} -u ${uq} -p ${vq}${pf}`
+    }
+    case "rdp": {
+      const pf = nonStandard ? ` --port ${port}` : ""
       return isHash
-        ? `netexec rdp ${host} -u '${u}' -H '${value}'`
-        : `netexec rdp ${host} -u '${u}' -p '${value}'`
-    case "ssh":
-      return `netexec ssh ${host} -u '${u}' -p '${value}'`
-    case "mssql":
+        ? `netexec rdp ${h} -u ${uq} -H ${vq}${pf}`
+        : `netexec rdp ${h} -u ${uq} -p ${vq}${pf}`
+    }
+    case "ssh": {
+      const pf = nonStandard ? ` --port ${port}` : ""
+      return `netexec ssh ${h} -u ${uq} -p ${vq}${pf}`
+    }
+    case "mssql": {
+      const pf = nonStandard ? ` --port ${port}` : ""
       return isHash
-        ? `netexec mssql ${host} -u '${u}' -H '${value}'`
-        : `netexec mssql ${host} -u '${u}' -p '${value}'`
+        ? `netexec mssql ${h} -u ${uq} -H ${vq}${pf}`
+        : `netexec mssql ${h} -u ${uq} -p ${vq}${pf}`
+    }
     case "mysql":
-      return `mysql -h ${host} -u '${u}' -p'${value}' -e 'SELECT 1' 2>&1 | head -5`
+      return `mysql -h ${h} -P ${port} -u ${uq} -p${vq} -e 'SELECT 1' 2>&1 | head -5`
     case "postgresql":
-      return `PGPASSWORD='${value}' psql -h ${host} -U '${u}' -c 'SELECT 1' 2>&1 | head -5`
+      return `PGPASSWORD=${vq} psql -h ${h} -p ${port} -U ${uq} -c 'SELECT 1' 2>&1 | head -5`
     case "ftp":
-      return `curl -s -u '${u}:${value}' ftp://${host}/ 2>&1 | head -5`
-    case "web":
-      return `curl -s -o /dev/null -w '%{http_code}' -u '${u}:${value}' http://${host}/`
+      return `curl -s -u ${shq(u + ":" + value)} ftp://${shq(host)}:${port}/ 2>&1 | head -5`
+    case "web": {
+      const scheme = port === 443 || port === 8443 ? "https" : "http"
+      return `curl -sk -o /dev/null -w '%{http_code}' -u ${shq(u + ":" + value)} ${scheme}://${shq(host)}:${port}/`
+    }
     default:
-      return `# Unknown service: ${service} on ${host}`
+      return `# Unknown service: ${service} on ${shq(host)}`
   }
 }
 
-function isNtlmHash(value: string): boolean {
+export function isNtlmHash(value: string): boolean {
   return /^[a-fA-F0-9]{32}(:[a-fA-F0-9]{32})?$/.test(value)
 }
 
@@ -162,17 +199,29 @@ export const CredSprayTool = Tool.define(
             return { title: "Error", metadata: {}, output: "Credential has no username or value." }
           }
 
-          const isHash = credType === "ntlm_hash" || credType === "hash" || isNtlmHash(value)
+          const isHash = credType === "ntlm_hash" || credType === "hash"
+            || (credType !== "password" && isNtlmHash(value))
           const serviceFilter = params.service_filter
             ? new Set(params.service_filter.split(",").map((s) => s.trim().toLowerCase()))
             : undefined
 
+          const hasScope = state.scope.targets.length > 0
           const targets: SprayTarget[] = []
+          const seen = new Set<string>()
           for (const [ip, host] of Object.entries(state.hosts)) {
+            if (hasScope && state.mode !== "free") {
+              const scopeResult = ScopeMatcher.checkScope(ip, state.scope)
+              if (!scopeResult.inScope) continue
+            }
+
             for (const svc of host.services) {
               const resolved = resolveService(svc)
               if (!resolved) continue
               if (serviceFilter && !serviceFilter.has(resolved)) continue
+
+              const dedup = `${ip}:${resolved}`
+              if (seen.has(dedup)) continue
+              seen.add(dedup)
 
               const alreadyHasAccess = host.access.some(
                 (a) => a.username === username,
@@ -183,7 +232,7 @@ export const CredSprayTool = Tool.define(
                 host: ip,
                 port: svc.port,
                 service: resolved,
-                command: buildCommand(resolved, ip, username, value, isHash),
+                command: buildCommand(resolved, ip, svc.port, username, value, isHash),
               })
             }
           }
@@ -226,7 +275,26 @@ export const CredSprayTool = Tool.define(
             grouped[key]!.push(t)
           }
 
+          const warnings: string[] = []
+
+          const lockoutThreshold = state.domain?.password_policy?.lockout_threshold
+          if (lockoutThreshold) {
+            const domainAuthHosts = new Set(
+              targets.filter((t) => DOMAIN_AUTH_SERVICES.has(t.service)).map((t) => t.host),
+            )
+            if (domainAuthHosts.size >= lockoutThreshold) {
+              warnings.push(
+                `LOCKOUT RISK: ${domainAuthHosts.size} domain-auth targets, lockout threshold = ${lockoutThreshold}.`,
+                `Spraying this plan will likely lock out the account "${username}".`,
+                `Instead: spray ONE password across MANY users, not one user across many hosts.`,
+                `Or split into batches of ${lockoutThreshold - 1} hosts max with delays between batches.`,
+                "",
+              )
+            }
+          }
+
           const lines: string[] = [
+            ...warnings,
             `Spray plan for ${username} (${credType}${isHash ? " — using hash" : ""}):`,
             `${targets.length} combinations across ${Object.keys(grouped).length} service types`,
             "",
@@ -244,7 +312,12 @@ export const CredSprayTool = Tool.define(
 
           return {
             title: `Spray: ${targets.length} targets`,
-            metadata: { count: targets.length, username, services: Object.keys(grouped) },
+            metadata: {
+              count: targets.length,
+              username,
+              services: Object.keys(grouped),
+              ...(warnings.length > 0 ? { lockout_warning: true } : {}),
+            },
             output: lines.join("\n"),
           }
         }).pipe(Effect.orDie),

@@ -62,7 +62,7 @@ function evaluateQualityGate(state: EngagementSchema.State, fromPhase: Engagemen
       break
     }
     case "vuln_assess": {
-      if (s.vulnerabilities === 0) warnings.push("No vulnerabilities found — consider deeper enumeration")
+      if (s.vulnerabilities === 0) missing.push("No vulnerabilities found — cannot proceed to exploitation without findings")
       const confirmedVulns = Object.values(state.hosts).some((h) => h.vulns.some((v) => v.status === "confirmed" || v.status === "exploited"))
       if (s.vulnerabilities > 0 && !confirmedVulns) warnings.push("All vulns are 'suspected' — validate before exploitation")
       const unvalidated = EngagementSchema.unvalidatedVulns(state)
@@ -70,7 +70,7 @@ function evaluateQualityGate(state: EngagementSchema.State, fromPhase: Engagemen
       break
     }
     case "exploitation": {
-      if (s.hosts_compromised === 0) warnings.push("No hosts compromised yet")
+      if (s.hosts_compromised === 0) missing.push("No hosts compromised — need at least one foothold for post-exploitation")
       const exploitedVulns = Object.values(state.hosts).flatMap((h) => h.vulns.filter((v) => v.status === "exploited"))
       if (exploitedVulns.length === 0 && s.vulnerabilities > 0) warnings.push("Vulnerabilities exist but none marked as exploited")
       break

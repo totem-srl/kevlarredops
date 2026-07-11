@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FSUtil } from "@pentestcode/core/fs-util"
@@ -321,9 +322,29 @@ export const GobusterParseTool = Tool.define(
           }
 
           const findings = classifyFindings(entries)
+          let oosFiltered = false
 
           if (shouldUpdate && findings.length > 0) {
             const state = yield* store.get()
+
+            if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+              const scopeResult = ScopeMatcher.checkScope(params.target_host, state.scope)
+              if (!scopeResult.inScope) {
+                oosFiltered = true
+                const output = formatOutput(entries, findings, false, params.target_host, targetPort)
+                return {
+                  title: `gobuster: ${entries.length} paths, ${findings.length} findings`,
+                  metadata: {
+                    paths: entries.length,
+                    findings: findings.length,
+                    format,
+                    auto_updated: false,
+                  },
+                  output: output + `\n\n[SCOPE] Target host ${params.target_host} is out of scope. Findings not added to engagement state.`,
+                }
+              }
+            }
+
             for (const finding of findings) {
               const evidenceStr = `gobuster/feroxbuster: ${finding.path} (${finding.status})`
               yield* store.addVuln(params.target_host, {

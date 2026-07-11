@@ -44,7 +44,7 @@ interface WeightedPath {
   nodes: string[]
   edges: WeightedEdge[]
   totalCost: number
-  successProbability: number
+  feasibilityScore: number
 }
 
 // ---------------------------------------------------------------------------
@@ -409,10 +409,12 @@ function buildWeightedGraph(state: EngagementSchema.State): Map<string, Weighted
       }
     }
   } else {
-    // Fallback: all-to-all from compromised hosts (original behavior)
+    // Fallback: same /24 heuristic — only connect hosts sharing a /24 prefix
     for (const srcIp of compromisedIPs) {
+      const srcPrefix = srcIp.split(".").slice(0, 3).join(".")
       for (const dstIp of hostIPs) {
         if (srcIp === dstIp) continue
+        if (!dstIp.startsWith(srcPrefix + ".")) continue
         const existing = adj.get(srcIp) ?? []
         if (existing.some((e) => e.from === srcIp && e.to === dstIp)) continue
         addEdge({
@@ -420,7 +422,7 @@ function buildWeightedGraph(state: EngagementSchema.State): Map<string, Weighted
           to: dstIp,
           relType: "SYNTHETIC",
           cost: SYNTHETIC_EDGE_COST,
-          metadata: "no segments defined — assumed reachable",
+          metadata: "same /24 heuristic — add segments for accuracy",
           opsecLevel: "noisy",
         })
       }
@@ -599,14 +601,13 @@ function reconstructPath(
     nodes,
     edges,
     totalCost,
-    successProbability: computeSuccessProbability(edges),
+    feasibilityScore: computeFeasibilityScore(edges),
   }
 }
 
-function computeSuccessProbability(edges: WeightedEdge[]): number {
+export function computeFeasibilityScore(edges: WeightedEdge[]): number {
   if (edges.length === 0) return 1.0
-  // Each hop's success probability derived from its cost:
-  // Lower cost = higher probability. Scale: cost 10 -> ~0.95, cost 50 -> ~0.70, cost 80 -> ~0.55
+  // Heuristic feasibility score derived from edge costs (not a true probability).
   let prob = 1.0
   for (const edge of edges) {
     const hopProb = Math.max(0.1, Math.min(0.99, 1.0 - edge.cost / 200))
@@ -687,7 +688,7 @@ function yenKShortest(
         nodes: totalNodes,
         edges: totalEdges,
         totalCost,
-        successProbability: computeSuccessProbability(totalEdges),
+        feasibilityScore: computeFeasibilityScore(totalEdges),
       }
 
       // Avoid duplicates
@@ -852,7 +853,7 @@ function formatWeightedPath(
   const lines: string[] = []
   const label = idx === 0 ? " (RECOMMENDED)" : ""
   const costStr = path.totalCost === Infinity ? "UNREACHABLE" : path.totalCost.toFixed(1)
-  lines.push(`=== Path ${idx + 1}${label} — Cost: ${costStr} | P(success): ${path.successProbability.toFixed(2)} ===`)
+  lines.push(`=== Path ${idx + 1}${label} — Cost: ${costStr} | Feasibility: ${path.feasibilityScore.toFixed(2)} ===`)
 
   for (let i = 0; i < path.edges.length; i++) {
     const edge = path.edges[i]!
@@ -1001,7 +1002,7 @@ export const AttackPathSuggestTool = Tool.define(
                 to: effectiveTarget,
                 paths: paths.length,
                 best_cost: Math.round(best.totalCost * 10) / 10,
-                best_probability: best.successProbability,
+                best_feasibility: best.feasibilityScore,
               },
               output: lines.join("\n"),
             }
@@ -1099,7 +1100,7 @@ export const AttackPathSuggestTool = Tool.define(
 
             lines.push(`${i + 1}. ${c.ip} [${complexity.toUpperCase()}] — ${reason}`)
             lines.push(`   Path: ${path.nodes.join(" -> ")} (${path.edges.length} hops)`)
-            lines.push(`   Cost: ${costStr} | P(success): ${path.successProbability.toFixed(2)}`)
+            lines.push(`   Cost: ${costStr} | Feasibility: ${path.feasibilityScore.toFixed(2)}`)
             lines.push(`   Tunnel: ${suggestTunnelType(state, fromIp)} | Creds: ${findCredsDescription(state, fromIp)}`)
 
             // Show edge breakdown for top 3
@@ -1109,6 +1110,12 @@ export const AttackPathSuggestTool = Tool.define(
                 .join(" -> ")
               lines.push(`   Edges: ${edgeInfo}`)
             }
+            lines.push("")
+          }
+
+          if (segments.length === 0) {
+            lines.push("[NOTE] No network segments defined — using same-/24 heuristic for reachability.")
+            lines.push("Add segments via state_update for more accurate path suggestions.")
             lines.push("")
           }
 

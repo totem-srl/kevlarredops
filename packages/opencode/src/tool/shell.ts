@@ -9,6 +9,8 @@ import { lazy } from "@/util/lazy"
 import { Language, type Node } from "web-tree-sitter"
 
 import { FSUtil } from "@pentestcode/core/fs-util"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { fileURLToPath } from "url"
 import { Config } from "@/config/config"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -344,6 +346,7 @@ export const ShellTool = Tool.define(
     const trunc = yield* Truncate.Service
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
+    const engStore = yield* EngagementStore.Service
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
@@ -628,7 +631,7 @@ export const ShellTool = Tool.define(
                 }),
               )
 
-              return yield* run(
+              const result = yield* run(
                 {
                   shell,
                   command: params.command,
@@ -638,6 +641,21 @@ export const ShellTool = Tool.define(
                 },
                 ctx,
               )
+
+              const engState = yield* engStore.get()
+              if (engState && engState.scope.targets.length > 0 && engState.mode !== "free") {
+                const targets = ScopeMatcher.extractTargetsFromCommand(params.command)
+                const ipTargets = targets.filter((t) => ScopeMatcher.isIp(t.split("/")[0]!) || ScopeMatcher.isCidr(t) || ScopeMatcher.isIpv6(t.split("/")[0]!))
+                const oos = ipTargets.filter((t) => {
+                  const r = ScopeMatcher.checkScope(t, engState.scope)
+                  return !r.inScope
+                })
+                if (oos.length > 0) {
+                  result.output = `[SCOPE WARNING: possible out-of-scope targets: ${oos.join(", ")}]\n\n` + result.output
+                }
+              }
+
+              return result
             }),
         }
       })

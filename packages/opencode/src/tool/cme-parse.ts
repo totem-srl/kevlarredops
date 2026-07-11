@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FSUtil } from "@pentestcode/core/fs-util"
@@ -241,10 +242,26 @@ export const CmeParseTool = Tool.define(
             }
           }
 
+          const oosIPs: string[] = []
+
           if (shouldUpdate) {
             const state = yield* store.get()
+            const inScopeHosts = hosts.filter((h) => {
+              if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                const result = ScopeMatcher.checkScope(h.ip, state.scope)
+                if (!result.inScope) { oosIPs.push(h.ip); return false }
+              }
+              return true
+            })
+            const inScopeCreds = credentials.filter((c) => {
+              if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                const result = ScopeMatcher.checkScope(c.ip, state.scope)
+                if (!result.inScope) { if (!oosIPs.includes(c.ip)) oosIPs.push(c.ip); return false }
+              }
+              return true
+            })
 
-            for (const h of hosts) {
+            for (const h of inScopeHosts) {
               yield* store.addHost(h.ip, {
                 ip: h.ip,
                 hostname: h.hostname,
@@ -296,7 +313,7 @@ export const CmeParseTool = Tool.define(
               }
             }
 
-            for (const c of credentials) {
+            for (const c of inScopeCreds) {
               const id = credId(c)
               const domain = c.domain ? `${c.domain}\\` : ""
               const credType = c.secret.match(/^[a-f0-9]{32}:[a-f0-9]{32}$/i) ? "ntlm_hash" : "password"
@@ -367,6 +384,11 @@ export const CmeParseTool = Tool.define(
           }
 
           let output = formatOutput(contentLines.length, credentials, hosts, failures, shouldUpdate)
+
+          if (oosIPs.length > 0) {
+            const unique = [...new Set(oosIPs)]
+            output += `\n\n[SCOPE] Filtered ${unique.length} out-of-scope host(s): ${unique.join(", ")}. Not added to engagement state.`
+          }
 
           if (shouldUpdate) {
             const adminCreds = credentials.filter((c) => c.isAdmin)

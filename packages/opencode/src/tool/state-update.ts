@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import DESCRIPTION from "./state-update.txt"
@@ -128,6 +129,16 @@ export const StateUpdateTool = Tool.define(
               const ip = d.ip as string
               if (!ip) {
                 return { title: "Error", metadata: {}, output: "Error: data.ip is required for add_host." }
+              }
+              if (state.scope.targets.length > 0 && state.mode !== "free") {
+                const scopeResult = ScopeMatcher.checkScope(ip, state.scope)
+                if (!scopeResult.inScope) {
+                  return {
+                    title: `Out of scope: ${ip}`,
+                    metadata: { out_of_scope: true, ip },
+                    output: `Host ${ip} is out of scope (${scopeResult.reason}). Not added to engagement state. Use mode=free to bypass scope checks.`,
+                  }
+                }
               }
               const hostData: Partial<{ -readonly [K in keyof EngagementSchema.Host]: EngagementSchema.Host[K] }> = {}
               if (d.hostname) hostData.hostname = d.hostname as string

@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import type { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { FSUtil } from "@pentestcode/core/fs-util"
@@ -313,11 +314,19 @@ export const NmapParseTool = Tool.define(
           }
 
           const totalServices = hosts.reduce((sum, h) => sum + h.services.length, 0)
+          const oosHosts: string[] = []
 
           // Auto-update engagement state
           if (shouldUpdate) {
             const state = yield* store.get()
-            for (const host of hosts) {
+            const inScopeHosts = hosts.filter((host) => {
+              if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+                const result = ScopeMatcher.checkScope(host.ip, state.scope)
+                if (!result.inScope) { oosHosts.push(host.ip); return false }
+              }
+              return true
+            })
+            for (const host of inScopeHosts) {
               const services: EngagementSchema.Service[] = host.services.map((s) => ({
                 port: s.port,
                 protocol: s.protocol,
@@ -384,6 +393,10 @@ export const NmapParseTool = Tool.define(
 
           if (shouldUpdate && hosts.length > 0) {
             output += `\n\n[Auto-critic] New hosts discovered. After enumeration, spawn "critic" subagent to validate any findings.`
+          }
+
+          if (oosHosts.length > 0) {
+            output += `\n\n[SCOPE] Filtered ${oosHosts.length} out-of-scope host(s): ${oosHosts.join(", ")}. Not added to engagement state.`
           }
 
           return {
