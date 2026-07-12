@@ -231,8 +231,10 @@ if (Script.release) {
   const skillsDir = path.resolve(dir, "../../skills")
   const distDir = path.resolve(dir, "dist")
   await $`tar -czf ${distDir}/skills.tar.gz -C ${skillsDir} .`
-  await $`cp ./script/install.sh ./dist/install.sh`
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz ./dist/install.sh --clobber --repo ${process.env.GH_REPO}`
+  // install.sh is served from the repo root via raw.githubusercontent (the
+  // public curl entrypoint) — do NOT also ship it as a release asset, to avoid
+  // two divergent installers.
+  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }
