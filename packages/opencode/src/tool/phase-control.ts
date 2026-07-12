@@ -64,7 +64,7 @@ function evaluateQualityGate(state: EngagementSchema.State, fromPhase: Engagemen
     case "vuln_assess": {
       if (s.vulnerabilities === 0) missing.push("No vulnerabilities found — cannot proceed to exploitation without findings")
       const confirmedVulns = Object.values(state.hosts).some((h) => h.vulns.some((v) => v.status === "confirmed" || v.status === "exploited"))
-      if (s.vulnerabilities > 0 && !confirmedVulns) warnings.push("All vulns are 'suspected' — validate before exploitation")
+      if (s.vulnerabilities > 0 && !confirmedVulns) missing.push("All vulnerabilities are unvalidated — run critic or manually confirm at least one before exploitation")
       const unvalidated = EngagementSchema.unvalidatedVulns(state)
       if (unvalidated.length > 0) warnings.push(`${unvalidated.length} unvalidated finding(s) — spawn critic before proceeding`)
       break
@@ -73,6 +73,8 @@ function evaluateQualityGate(state: EngagementSchema.State, fromPhase: Engagemen
       if (s.hosts_compromised === 0) missing.push("No hosts compromised — need at least one foothold for post-exploitation")
       const exploitedVulns = Object.values(state.hosts).flatMap((h) => h.vulns.filter((v) => v.status === "exploited"))
       if (exploitedVulns.length === 0 && s.vulnerabilities > 0) warnings.push("Vulnerabilities exist but none marked as exploited")
+      const critHighConfirmed = Object.values(state.hosts).flatMap((h) => h.vulns.filter((v) => (v.severity === "critical" || v.severity === "high") && v.status === "confirmed"))
+      if (critHighConfirmed.length > 0 && exploitedVulns.length === 0) warnings.push(`${critHighConfirmed.length} critical/high confirmed vuln(s) not yet exploited`)
       break
     }
     case "post_exploit": {
@@ -83,9 +85,24 @@ function evaluateQualityGate(state: EngagementSchema.State, fromPhase: Engagemen
       if (hostsWithAccess.length < totalHosts && totalHosts > 1) {
         warnings.push(`Only ${hostsWithAccess.length}/${totalHosts} hosts have access — consider lateral movement`)
       }
+      const lateralMoves = (state.relationships ?? []).filter((r) => r.rel_type === "LATERAL_MOVE" || r.rel_type === "PIVOT_TO")
+      if (hostsWithAccess.length <= 1 && totalHosts >= 3 && lateralMoves.length === 0) {
+        const failedLateral = state.attack_path.filter((s) => s.success === false)
+        if (failedLateral.length > 0) {
+          warnings.push(`Only ${hostsWithAccess.length} of ${totalHosts} hosts compromised — lateral movement was attempted (${failedLateral.length} failed) but not successful`)
+        } else {
+          missing.push(`Only ${hostsWithAccess.length} of ${totalHosts} hosts compromised with no lateral movement attempted — try lateral movement before reporting`)
+        }
+      }
       if (state.objectives) {
-        const incompleteObj = Object.values(state.objectives).filter((o) => o.status !== "completed" && o.status !== "abandoned")
-        if (incompleteObj.length > 0) warnings.push(`${incompleteObj.length} objective(s) not completed`)
+        const allObj = Object.values(state.objectives)
+        const completedOrAbandoned = allObj.filter((o) => o.status === "completed" || o.status === "abandoned")
+        if (allObj.length > 0 && completedOrAbandoned.length === 0) {
+          missing.push("No objectives completed or abandoned — finish at least one objective before reporting")
+        } else {
+          const incompleteObj = allObj.filter((o) => o.status !== "completed" && o.status !== "abandoned")
+          if (incompleteObj.length > 0) warnings.push(`${incompleteObj.length} objective(s) not completed`)
+        }
       }
       break
     }
@@ -112,7 +129,7 @@ function formatGateResult(gate: QualityGateResult): string {
   }
   if (!gate.passed) {
     lines.push("")
-    lines.push("Use force:true to skip quality gates and advance anyway.")
+    lines.push("Use force:true to override (logged to audit trail).")
   }
   return lines.join("\n")
 }
@@ -184,6 +201,19 @@ export const PhaseControlTool = Tool.define(
             const nextPhase = PHASE_ORDER[currentIndex + 1]!
 
             // Quality gate check
+            if (params.force) {
+              const gate = evaluateQualityGate(state, state.current_phase)
+              if (!gate.passed || gate.warnings.length > 0) {
+                yield* store.addAlert({
+                  id: `force-gate-${Date.now()}`,
+                  severity: "high",
+                  title: `Quality gate forced: ${state.current_phase} → ${nextPhase}`,
+                  details: [...gate.missing, ...gate.warnings].join("; "),
+                  source_agent: "phase_control",
+                  timestamp: new Date().toISOString(),
+                })
+              }
+            }
             if (!params.force) {
               const gate = evaluateQualityGate(state, state.current_phase)
               if (!gate.passed) {
@@ -247,6 +277,23 @@ export const PhaseControlTool = Tool.define(
           // Quality gate check for forward transitions
           const targetIndex = PHASE_ORDER.indexOf(params.phase)
           const currentIndex2 = PHASE_ORDER.indexOf(state.current_phase)
+          if (params.force && targetIndex > currentIndex2) {
+            const allIssues: string[] = []
+            for (let i = currentIndex2; i < targetIndex; i++) {
+              const gate = evaluateQualityGate(state, PHASE_ORDER[i]!)
+              allIssues.push(...gate.missing, ...gate.warnings)
+            }
+            if (allIssues.length > 0) {
+              yield* store.addAlert({
+                id: `force-gate-${Date.now()}`,
+                severity: "high",
+                title: `Quality gate forced: ${state.current_phase} → ${params.phase}`,
+                details: allIssues.join("; "),
+                source_agent: "phase_control",
+                timestamp: new Date().toISOString(),
+              })
+            }
+          }
           if (!params.force && targetIndex > currentIndex2) {
             // Check gates for all phases being skipped
             for (let i = currentIndex2; i < targetIndex; i++) {

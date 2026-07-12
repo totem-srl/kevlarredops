@@ -138,6 +138,8 @@ export function matchesScopeEntry(target: string, entry: string): boolean {
 const IP_RE = /\b(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?\b/g
 const DOMAIN_RE = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi
 const IPV6_CMD_RE = /(?:^|[\s=])([0-9a-fA-F:]{2,39}(?:\/\d{1,3})?)\b/g
+const USER_AT_HOST_RE = /(?:^|[\s=])(?:[a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+(?:\.[a-zA-Z]{2,})?)/g
+const UNC_PATH_RE = /(?:^|[\s=])(?:\\\\|\/\/)([a-zA-Z0-9._-]+)/g
 
 const IGNORE_IPS = new Set(["127.0.0.1", "0.0.0.0", "255.255.255.255"])
 const IGNORE_DOMAINS = new Set([
@@ -195,7 +197,31 @@ export function extractTargetsFromCommand(command: string): string[] {
     }
   }
 
+  for (const match of command.matchAll(USER_AT_HOST_RE)) {
+    const host = match[1]!
+    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host)) {
+      if (isIp(host) || host.includes(".")) targets.add(host)
+    }
+  }
+
+  for (const match of command.matchAll(UNC_PATH_RE)) {
+    const host = match[1]!
+    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host)) {
+      targets.add(host)
+    }
+  }
+
   return [...targets]
+}
+
+const KNOWN_TOOLS_RE = /\b(?:nmap|netexec|crackmapexec|ssh|scp|sftp|curl|wget|smbclient|rpcclient|evil-winrm|psexec|wmiexec|impacket|nuclei|gobuster|feroxbuster|ffuf|sqlmap|hydra|medusa|nikto|dirb|dirsearch)\b/i
+
+export function extractTargetsWithWarning(command: string): { targets: string[]; warning?: string } {
+  const targets = extractTargetsFromCommand(command)
+  if (targets.length === 0 && KNOWN_TOOLS_RE.test(command)) {
+    return { targets, warning: "Could not extract targets from command. Manual scope check may be needed." }
+  }
+  return { targets }
 }
 
 // --- Scope check ---
@@ -219,6 +245,6 @@ export function checkScope(target: string, scope: EngagementSchema.Scope): Scope
     }
   }
 
-  // TODO: DNS resolution for domain-vs-CIDR cross-matching (async, needs caching)
+  // TODO: DNS/state-based cross-matching for domain↔IP (deferred — needs pivot/SOCKS-aware resolution)
   return { inScope: false, matchedRule: null, reason: "not_matched" }
 }

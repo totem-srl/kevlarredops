@@ -1,43 +1,29 @@
 import { describe, expect, test } from "bun:test"
-import { computeFeasibilityScore } from "@/tool/attack-path-suggest"
+import { computeDifficulty } from "@/tool/attack-path-suggest"
 
-describe("computeFeasibilityScore", () => {
-  test("empty edges returns 1.0", () => {
-    expect(computeFeasibilityScore([])).toBe(1.0)
+describe("computeDifficulty", () => {
+  test("low cost returns Easy", () => {
+    expect(computeDifficulty(10)).toBe("Easy")
+    expect(computeDifficulty(30)).toBe("Easy")
   })
 
-  test("low cost edge gives high score", () => {
-    const edges = [{ from: "a", to: "b", relType: "MEMBER_OF", cost: 5, metadata: "", opsecLevel: "silent" as const }]
-    const score = computeFeasibilityScore(edges)
-    expect(score).toBeGreaterThan(0.9)
-    expect(score).toBeLessThanOrEqual(1.0)
+  test("medium cost returns Medium", () => {
+    expect(computeDifficulty(31)).toBe("Medium")
+    expect(computeDifficulty(80)).toBe("Medium")
   })
 
-  test("high cost edge gives lower score", () => {
-    const edges = [{ from: "a", to: "b", relType: "SYNTHETIC", cost: 100, metadata: "", opsecLevel: "noisy" as const }]
-    const score = computeFeasibilityScore(edges)
-    expect(score).toBeLessThan(0.6)
-    expect(score).toBeGreaterThan(0)
+  test("high cost returns Hard", () => {
+    expect(computeDifficulty(81)).toBe("Hard")
+    expect(computeDifficulty(150)).toBe("Hard")
   })
 
-  test("multiple hops reduce score multiplicatively", () => {
-    const edge = { from: "a", to: "b", relType: "LATERAL_MOVE", cost: 30, metadata: "", opsecLevel: "quiet" as const }
-    const singleHop = computeFeasibilityScore([edge])
-    const twoHop = computeFeasibilityScore([edge, edge])
-    expect(twoHop).toBeLessThan(singleHop)
-    expect(twoHop).toBeGreaterThan(0)
+  test("very high cost returns Very Hard", () => {
+    expect(computeDifficulty(151)).toBe("Very Hard")
+    expect(computeDifficulty(500)).toBe("Very Hard")
+    expect(computeDifficulty(Infinity)).toBe("Very Hard")
   })
 
-  test("score stays in [0.1, 0.99] range per hop", () => {
-    const extremeEdge = { from: "a", to: "b", relType: "TEST", cost: 500, metadata: "", opsecLevel: "noisy" as const }
-    const score = computeFeasibilityScore([extremeEdge])
-    expect(score).toBeGreaterThanOrEqual(0.1)
-    expect(score).toBeLessThanOrEqual(0.99)
-  })
-
-  test("infinity cost gives minimum score", () => {
-    const infEdge = { from: "a", to: "b", relType: "EXPIRED", cost: Infinity, metadata: "", opsecLevel: "noisy" as const }
-    const score = computeFeasibilityScore([infEdge])
-    expect(score).toBe(0.1)
+  test("zero cost returns Easy", () => {
+    expect(computeDifficulty(0)).toBe("Easy")
   })
 })

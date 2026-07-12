@@ -44,7 +44,7 @@ interface WeightedPath {
   nodes: string[]
   edges: WeightedEdge[]
   totalCost: number
-  feasibilityScore: number
+  difficulty: string
 }
 
 // ---------------------------------------------------------------------------
@@ -408,25 +408,6 @@ function buildWeightedGraph(state: EngagementSchema.State): Map<string, Weighted
         })
       }
     }
-  } else {
-    // Fallback: same /24 heuristic — only connect hosts sharing a /24 prefix
-    for (const srcIp of compromisedIPs) {
-      const srcPrefix = srcIp.split(".").slice(0, 3).join(".")
-      for (const dstIp of hostIPs) {
-        if (srcIp === dstIp) continue
-        if (!dstIp.startsWith(srcPrefix + ".")) continue
-        const existing = adj.get(srcIp) ?? []
-        if (existing.some((e) => e.from === srcIp && e.to === dstIp)) continue
-        addEdge({
-          from: srcIp,
-          to: dstIp,
-          relType: "SYNTHETIC",
-          cost: SYNTHETIC_EDGE_COST,
-          metadata: "same /24 heuristic — add segments for accuracy",
-          opsecLevel: "noisy",
-        })
-      }
-    }
   }
 
   return adj
@@ -601,19 +582,15 @@ function reconstructPath(
     nodes,
     edges,
     totalCost,
-    feasibilityScore: computeFeasibilityScore(edges),
+    difficulty: computeDifficulty(totalCost),
   }
 }
 
-export function computeFeasibilityScore(edges: WeightedEdge[]): number {
-  if (edges.length === 0) return 1.0
-  // Heuristic feasibility score derived from edge costs (not a true probability).
-  let prob = 1.0
-  for (const edge of edges) {
-    const hopProb = Math.max(0.1, Math.min(0.99, 1.0 - edge.cost / 200))
-    prob *= hopProb
-  }
-  return Math.round(prob * 100) / 100
+export function computeDifficulty(totalCost: number): string {
+  if (totalCost <= 30) return "Easy"
+  if (totalCost <= 80) return "Medium"
+  if (totalCost <= 150) return "Hard"
+  return "Very Hard"
 }
 
 // ---------------------------------------------------------------------------
@@ -688,7 +665,7 @@ function yenKShortest(
         nodes: totalNodes,
         edges: totalEdges,
         totalCost,
-        feasibilityScore: computeFeasibilityScore(totalEdges),
+        difficulty: computeDifficulty(totalCost),
       }
 
       // Avoid duplicates
@@ -853,7 +830,7 @@ function formatWeightedPath(
   const lines: string[] = []
   const label = idx === 0 ? " (RECOMMENDED)" : ""
   const costStr = path.totalCost === Infinity ? "UNREACHABLE" : path.totalCost.toFixed(1)
-  lines.push(`=== Path ${idx + 1}${label} — Cost: ${costStr} | Feasibility: ${path.feasibilityScore.toFixed(2)} ===`)
+  lines.push(`=== Path ${idx + 1}${label} — Cost: ${costStr} | Difficulty: ${path.difficulty} ===`)
 
   for (let i = 0; i < path.edges.length; i++) {
     const edge = path.edges[i]!
@@ -1002,7 +979,7 @@ export const AttackPathSuggestTool = Tool.define(
                 to: effectiveTarget,
                 paths: paths.length,
                 best_cost: Math.round(best.totalCost * 10) / 10,
-                best_feasibility: best.feasibilityScore,
+                best_difficulty: best.difficulty,
               },
               output: lines.join("\n"),
             }
@@ -1100,7 +1077,7 @@ export const AttackPathSuggestTool = Tool.define(
 
             lines.push(`${i + 1}. ${c.ip} [${complexity.toUpperCase()}] — ${reason}`)
             lines.push(`   Path: ${path.nodes.join(" -> ")} (${path.edges.length} hops)`)
-            lines.push(`   Cost: ${costStr} | Feasibility: ${path.feasibilityScore.toFixed(2)}`)
+            lines.push(`   Cost: ${costStr} | Difficulty: ${path.difficulty}`)
             lines.push(`   Tunnel: ${suggestTunnelType(state, fromIp)} | Creds: ${findCredsDescription(state, fromIp)}`)
 
             // Show edge breakdown for top 3
@@ -1114,8 +1091,8 @@ export const AttackPathSuggestTool = Tool.define(
           }
 
           if (segments.length === 0) {
-            lines.push("[NOTE] No network segments defined — using same-/24 heuristic for reachability.")
-            lines.push("Add segments via state_update for more accurate path suggestions.")
+            lines.push("[NOTE] No network segments defined — paths based on explicit relationships only.")
+            lines.push("Use state_update add_segment to define network topology for reachability-based suggestions.")
             lines.push("")
           }
 

@@ -644,14 +644,16 @@ export const ShellTool = Tool.define(
 
               const engState = yield* engStore.get()
               if (engState && engState.scope.targets.length > 0 && engState.mode !== "free") {
-                const targets = ScopeMatcher.extractTargetsFromCommand(params.command)
-                const ipTargets = targets.filter((t) => ScopeMatcher.isIp(t.split("/")[0]!) || ScopeMatcher.isCidr(t) || ScopeMatcher.isIpv6(t.split("/")[0]!))
-                const oos = ipTargets.filter((t) => {
+                const { targets, warning } = ScopeMatcher.extractTargetsWithWarning(params.command)
+                const oos = targets.filter((t) => {
                   const r = ScopeMatcher.checkScope(t, engState.scope)
                   return !r.inScope
                 })
                 if (oos.length > 0) {
                   result.output = `[SCOPE WARNING: possible out-of-scope targets: ${oos.join(", ")}]\n\n` + result.output
+                }
+                if (warning) {
+                  result.output = `[${warning}]\n\n` + result.output
                 }
               }
 
