@@ -207,16 +207,36 @@ const discoverSkills = Effect.fnUntraced(function* (
     yield* scan(state, dir, OPENCODE_SKILL_PATTERN)
   }
 
+  // Global skills home: always discoverable regardless of cwd. Engagements are
+  // global (~/.pentestcode/engagements), so sessions run from arbitrary
+  // directories; bundled/user skills placed here load everywhere.
+  const globalSkills = path.join(global.home, ".pentestcode", "skills")
+  if (yield* fsys.isDir(globalSkills)) {
+    yield* scan(state, globalSkills, SKILL_PATTERN)
+  }
+
   const cfg = yield* config.get()
   for (const item of cfg.skills?.paths ?? []) {
     const expanded = item.startsWith("~/") ? path.join(global.home, item.slice(2)) : item
-    const dir = path.isAbsolute(expanded) ? expanded : path.join(directory, expanded)
-    if (!(yield* fsys.isDir(dir))) {
-      yield* Effect.logWarning("skill path not found", { path: dir })
-      continue
+    // A relative skill path must not depend on the session cwd, which is
+    // arbitrary for global engagements. Resolve it against the session
+    // directory AND the project root of every discovered config dir (e.g. the
+    // parent of <root>/.pentestcode), scanning whichever exist.
+    const candidates = path.isAbsolute(expanded)
+      ? [expanded]
+      : [path.join(directory, expanded), ...configDirs.map((d) => path.join(path.dirname(d), expanded))]
+    const seen = new Set<string>()
+    let found = false
+    for (const dir of candidates) {
+      if (seen.has(dir)) continue
+      seen.add(dir)
+      if (!(yield* fsys.isDir(dir))) continue
+      found = true
+      yield* scan(state, dir, SKILL_PATTERN)
     }
-
-    yield* scan(state, dir, SKILL_PATTERN)
+    if (!found) {
+      yield* Effect.logWarning("skill path not found", { path: expanded, candidates: Array.from(seen) })
+    }
   }
 
   for (const url of cfg.skills?.urls ?? []) {

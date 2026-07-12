@@ -83,6 +83,7 @@ export interface Interface {
   // Agent Context Carry
   readonly addAgentContext: (summary: EngagementSchema.AgentContextSummary) => Effect.Effect<void>
   readonly getAgentContexts: (agentType: string, limit?: number) => Effect.Effect<EngagementSchema.AgentContextSummary[]>
+  readonly getRecentAgentContexts: (limit?: number) => Effect.Effect<EngagementSchema.AgentContextSummary[]>
   // Interrupt Alerts
   readonly drainInterruptAlerts: () => Effect.Effect<EngagementSchema.Alert[]>
   readonly hasInterruptAlerts: () => Effect.Effect<boolean>
@@ -815,6 +816,15 @@ const layer = Layer.effect(
         const all = yield* Ref.get(agentContextsRef)
         const entries = all[agentType] ?? []
         return limit ? entries.slice(-limit) : entries
+      }),
+
+      // Newest contexts across ALL agent types, so a fresh subagent sees what
+      // OTHER specialists already did (cross-type dedup), not only its own kind.
+      getRecentAgentContexts: Effect.fn("EngagementStore.getRecentAgentContexts")(function* (limit) {
+        const all = yield* Ref.get(agentContextsRef)
+        const flat = Object.values(all).flat()
+        flat.sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
+        return limit ? flat.slice(0, limit) : flat
       }),
 
       // --- Interrupt Alerts ---

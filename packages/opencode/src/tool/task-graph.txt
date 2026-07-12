@@ -1,14 +1,24 @@
 Manage the engagement task graph — a DAG of pentest tasks with dependencies, priorities, and agent assignments.
 
+`data` MUST be a JSON object (not a string). Each action reads only the fields it needs.
+
 Actions:
-- plan: Bulk-add tasks to the graph. data: { tasks: [{ id, description, assignedAgent?, priority?, target?, technique?, phase?, dependsOn?: string[] }] }
-- dispatch: Mark a task as dispatched to an agent. data: { id, assignedAgent?, sessionId? }
-- complete: Mark task completed with optional result. data: { id, result? }
+- plan: Bulk-add tasks. data: { tasks: [{ id, description, assignedAgent?, priority?, target?, technique?, phase?, dependsOn? }] }
+    priority is one of: "critical" | "high" | "medium" | "low". dependsOn is an array of task ids.
+    Concrete example:
+      {
+        "tasks": [
+          { "id": "t1", "description": "Port scan 10.0.0.5", "assignedAgent": "scanner", "priority": "high", "target": "10.0.0.5" },
+          { "id": "t2", "description": "Enumerate web app", "assignedAgent": "webapp", "dependsOn": ["t1"] }
+        ]
+      }
+- dispatch: Mark a task as dispatched to an agent. data: { id, assignedAgent?, sessionId? }  — e.g. { "id": "t1", "assignedAgent": "scanner" }
+- complete: Mark task completed with optional result. data: { id, result? }  — e.g. { "id": "t1", "result": "3 open ports" }
 - fail: Mark task failed. data: { id, result? }
 - abandon: Mark task abandoned. data: { id }
-- list_ready: List tasks ready for dispatch (all deps completed).
-- list_all: List all tasks with status summary.
-- status: Quick status summary (counts per status).
+- list_ready: List tasks ready for dispatch (all deps completed). No data.
+- list_all: List all tasks with status summary. No data.
+- status: Quick status summary (counts per status). No data.
 
 Task states: planned → ready (auto when deps complete) → dispatched → running → completed/failed/abandoned
 Tasks with failed/abandoned dependencies become "blocked".

@@ -6,6 +6,38 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import DESCRIPTION from "./task-graph.txt"
 import * as Tool from "./tool"
 
+const TaskInput = Schema.Struct({
+  id: Schema.String.annotate({ description: "Unique task id, e.g. 't1'." }),
+  description: Schema.String.annotate({ description: "What the task accomplishes." }),
+  assignedAgent: Schema.optional(Schema.String).annotate({
+    description: "Subagent to run it, e.g. 'scanner', 'webapp', 'enumerator'.",
+  }),
+  priority: Schema.optional(TaskGraph.TaskPriority),
+  target: Schema.optional(Schema.String),
+  technique: Schema.optional(Schema.String),
+  phase: Schema.optional(Schema.String),
+  dependsOn: Schema.optional(Schema.Array(Schema.String)).annotate({
+    description: "Ids of tasks that must complete first.",
+  }),
+}).annotate({ identifier: "TaskGraphTaskInput" })
+
+// A single, concrete object shape shared by every action. Giving the model a
+// real JSON schema (rather than an opaque Unknown) both documents the nested
+// `tasks` array and stops providers that stringify unconstrained params — the
+// prior cause of malformed-JSON crashes. All fields are optional; each action
+// reads only the ones it needs.
+const Data = Schema.Struct({
+  tasks: Schema.optional(Schema.Array(TaskInput)).annotate({
+    description: "For 'plan': the tasks to add.",
+  }),
+  id: Schema.optional(Schema.String).annotate({
+    description: "For dispatch/complete/fail/abandon: the task id.",
+  }),
+  assignedAgent: Schema.optional(Schema.String).annotate({ description: "For dispatch: overrides the assignee." }),
+  sessionId: Schema.optional(Schema.String).annotate({ description: "For dispatch: subagent session id." }),
+  result: Schema.optional(Schema.String).annotate({ description: "For complete/fail: a short result note." }),
+}).annotate({ identifier: "TaskGraphData" })
+
 export const Parameters = Schema.Struct({
   action: Schema.Literals([
     "plan",
@@ -19,8 +51,8 @@ export const Parameters = Schema.Struct({
   ]).annotate({
     description: "Task graph operation to perform.",
   }),
-  data: Schema.optional(Schema.Unknown).annotate({
-    description: "Action-specific data. See tool description for required fields per action.",
+  data: Schema.optional(Data).annotate({
+    description: "Action-specific data. See tool description for the fields each action uses.",
   }),
 })
 
@@ -49,8 +81,27 @@ export const TaskGraphTool = Tool.define(
           const state = yield* store.get()
           if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
 
-          const raw = params.data ?? {}
-          const d = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, any>
+          // Defensive normalization. The typed schema should deliver a plain
+          // object, but tolerate a stringified blob or common shape drift
+          // (tasks array sent directly as `data`, or singular `task`) instead
+          // of dying under Effect.orDie.
+          let d: any = params.data ?? {}
+          if (typeof d === "string") {
+            try {
+              d = JSON.parse(d)
+            } catch {
+              return {
+                title: "Error",
+                metadata: {},
+                output: "Error: `data` was a string but not valid JSON. Send `data` as a JSON object, not text.",
+              }
+            }
+          }
+          if (Array.isArray(d)) d = { tasks: d }
+          if (d && typeof d === "object" && d.task && !d.tasks) {
+            d = { ...d, tasks: Array.isArray(d.task) ? d.task : [d.task] }
+          }
+          if (!d || typeof d !== "object") d = {}
 
           switch (params.action) {
             case "plan": {
@@ -65,22 +116,45 @@ export const TaskGraphTool = Tool.define(
                 dependsOn?: string[]
               }>
               if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
-                return { title: "Error", metadata: {}, output: "Error: data.tasks array is required for plan." }
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output:
+                    'Error: data.tasks must be a non-empty array. Example: {"tasks":[{"id":"t1","description":"scan host","assignedAgent":"scanner"}]}',
+                }
               }
               const now = new Date().toISOString()
-              const newNodes: TaskGraph.TaskNode[] = tasks.map((t) => ({
-                id: t.id,
-                description: t.description,
-                status: "planned" as const,
-                assignedAgent: t.assignedAgent,
-                priority: t.priority,
-                target: t.target,
-                technique: t.technique,
-                phase: t.phase,
-                dependsOn: t.dependsOn ?? [],
-                createdAt: now,
-                updatedAt: now,
-              }))
+              // Skip malformed entries rather than failing the whole batch, so
+              // one bad task doesn't lose the others.
+              const skipped: string[] = []
+              const newNodes: TaskGraph.TaskNode[] = tasks.flatMap((t, i) => {
+                if (!t || typeof t !== "object" || typeof t.id !== "string" || typeof t.description !== "string") {
+                  skipped.push(`#${i} (needs string id + description)`)
+                  return []
+                }
+                return [
+                  {
+                    id: t.id,
+                    description: t.description,
+                    status: "planned" as const,
+                    assignedAgent: t.assignedAgent,
+                    priority: t.priority,
+                    target: t.target,
+                    technique: t.technique,
+                    phase: t.phase,
+                    dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn : [],
+                    createdAt: now,
+                    updatedAt: now,
+                  },
+                ]
+              })
+              if (newNodes.length === 0) {
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output: `Error: no valid tasks. Each task needs a string id and description. Skipped: ${skipped.join(", ")}`,
+                }
+              }
               let graph = yield* store.getTaskGraph()
               graph = TaskGraph.addTasks(graph, newNodes)
               yield* store.setTaskGraph(graph)
@@ -96,10 +170,11 @@ export const TaskGraphTool = Tool.define(
                 })
               }
               const ready = TaskGraph.getReady(graph)
+              const skipNote = skipped.length > 0 ? ` Skipped ${skipped.length} malformed: ${skipped.join(", ")}.` : ""
               return {
                 title: `Planned ${newNodes.length} tasks`,
                 metadata: {},
-                output: `Added ${newNodes.length} tasks. ${ready.length} ready for dispatch.\n${newNodes.map(formatTask).join("\n")}`,
+                output: `Added ${newNodes.length} tasks. ${ready.length} ready for dispatch.${skipNote}\n${newNodes.map(formatTask).join("\n")}`,
               }
             }
 

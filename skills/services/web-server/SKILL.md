@@ -62,19 +62,37 @@ curl -X OPTIONS http://<t>/ -sI | grep -i allow
 ```bash
 # Technology detection
 whatweb http://<t> -a 3
-curl -sI http://<t>   # Server, X-Powered-By headers
-
-# Common backup files
-for ext in bak old orig save swp ~; do curl -sI "http://<t>/index.php.$ext"; done
-
-# Sensitive paths
-for p in .git/HEAD .env .DS_Store wp-config.php.bak web.config robots.txt sitemap.xml; do
-  curl -sI "http://<t>/$p"
-done
+curl -sI http://<t>   # single header dump is fine
 ```
 
+Backup-file and sensitive-path checks: do these with `ffuf`/`gobuster`, NOT a `curl`
+bash-loop. Put the candidate paths in a file and fuzz once:
+
+```bash
+# sensitive/backup paths in one run, then parse
+cat > paths.txt <<'EOF'
+.git/HEAD
+.env
+.DS_Store
+web.config
+wp-config.php.bak
+robots.txt
+sitemap.xml
+index.php.bak
+index.php.old
+index.php.orig
+index.php~
+EOF
+ffuf -w paths.txt -u http://<t>/FUZZ -mc 200,301,302,401,403 -o ffuf.json -of json
+# then: gobuster_parse on the results
+```
+
+A `for ext in bak old ...; do curl ...; done` loop is the WRONG pattern — use the ffuf
+run above. If ffuf/gobuster is missing, install it (`apt install -y ffuf gobuster`)
+rather than looping curl.
+
 ## Output Rules
-- Always use quiet/filtered output flags. Only show successful results.
-- For gobuster/ffuf: use `-q -n --no-error` or `-mc` match codes to suppress noise.
+- Never curl-loop over paths — that's what ffuf/gobuster are for. Single `curl` only for one-off requests.
+- For gobuster/ffuf: use `-q -n --no-error` or `-mc` match codes to suppress noise, then `gobuster_parse`.
 - Redirect large output to files. Never paste >50 lines of raw tool output.
 - Use `gobuster_parse` and `nuclei_parse` for auto-processing.

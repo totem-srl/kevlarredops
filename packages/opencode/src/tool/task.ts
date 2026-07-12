@@ -16,6 +16,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@pentestcode/core/database/database"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -153,6 +154,30 @@ function formatPriorContext(contexts: EngagementSchema.AgentContextSummary[]): s
   return lines.join("\n")
 }
 
+// What OTHER specialist agents already did — so a fresh agent doesn't re-run
+// enumeration a different agent type has already covered. Compact on purpose.
+function formatOtherAgentsWork(contexts: EngagementSchema.AgentContextSummary[]): string {
+  const lines: string[] = ["<other-agents-work>", "Work already done by OTHER agents this engagement — do NOT repeat it:"]
+  for (const ctx of contexts) {
+    const findings = ctx.key_findings.slice(0, 3).join("; ")
+    lines.push(`  - [${ctx.agent_type}] ${ctx.task_description}${findings ? ` — found: ${findings}` : ""}`)
+  }
+  lines.push("Check state_query for the full picture before enumerating.")
+  lines.push("</other-agents-work>")
+  return lines.join("\n")
+}
+
+// Subagents currently running, so a fresh agent knows what's in progress and
+// picks different work rather than colliding with a live sibling.
+function formatInFlightSiblings(tasks: TaskGraph.TaskNode[]): string {
+  const lines: string[] = ["<in-flight-agents>", "These tasks are dispatched/running RIGHT NOW — do NOT duplicate them:"]
+  for (const t of tasks) {
+    lines.push(`  - ${t.id} [${t.status}]${t.assignedAgent ? ` @${t.assignedAgent}` : ""}: ${t.description}${t.target ? ` (${t.target})` : ""}`)
+  }
+  lines.push("</in-flight-agents>")
+  return lines.join("\n")
+}
+
 function formatInterruptAlert(alert: EngagementSchema.Alert): string {
   return [
     `<interrupt-alert source="${alert.source_agent ?? "unknown"}" severity="${alert.severity}">`,
@@ -271,11 +296,23 @@ export const TaskTool = Tool.define(
       const ops = ctx.extra?.promptOps as TaskPromptOps
       if (!ops) return yield* Effect.fail(new Error("TaskTool requires promptOps in ctx.extra"))
 
-      // Agent Context Carry: inject prior context from same-type agents on fresh spawn
-      const priorContexts = yield* engagementStore.getAgentContexts(params.subagent_type, 5)
+      // Agent Context Carry: on a fresh spawn, tell the subagent (a) what its
+      // own type did before, (b) what OTHER agent types already did (cross-type
+      // dedup), and (c) which sibling tasks are running right now. This is the
+      // fix for subagents re-enumerating work peers already finished.
       let augmentedPrompt = params.prompt
-      if (priorContexts.length > 0 && !params.task_id) {
-        augmentedPrompt = formatPriorContext(priorContexts) + "\n\n" + params.prompt
+      if (!params.task_id) {
+        const priorContexts = yield* engagementStore.getAgentContexts(params.subagent_type, 5)
+        const recentContexts = yield* engagementStore.getRecentAgentContexts(10)
+        const otherAgents = recentContexts.filter((c) => c.agent_type !== params.subagent_type).slice(0, 6)
+        const graph = yield* engagementStore.getTaskGraph()
+        const inFlight = TaskGraph.getRunning(graph)
+
+        const blocks: string[] = []
+        if (priorContexts.length > 0) blocks.push(formatPriorContext(priorContexts))
+        if (otherAgents.length > 0) blocks.push(formatOtherAgentsWork(otherAgents))
+        if (inFlight.length > 0) blocks.push(formatInFlightSiblings(inFlight))
+        if (blocks.length > 0) augmentedPrompt = blocks.join("\n\n") + "\n\n" + params.prompt
       }
 
       const runTask = Effect.fn("TaskTool.runTask")(function* () {

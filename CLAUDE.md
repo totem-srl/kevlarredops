@@ -79,7 +79,7 @@ Prompts in: `packages/opencode/src/session/prompt/*.txt` and `packages/opencode/
 - **Pentest tools**: `packages/opencode/src/tool/state-query.ts`, `state-update.ts`, `nmap-parse.ts`, `nuclei-parse.ts`, `gobuster-parse.ts`, `cme-parse.ts`, `bloodhound-parse.ts`, `cred-spray.ts`, `scope-check.ts`, `phase-control.ts`, `report-gen.ts`, `sqlmap-parse.ts`, `xss-detect.ts`, `jwt-analyze.ts`, `tunnel-manage.ts`, `attack-path-suggest.ts`
 - **App runtime (V1)**: `packages/opencode/src/effect/app-runtime.ts` (LayerNode graph)
 - **Location services (V2)**: `packages/core/src/location-services.ts` (V2 layer graph)
-- **Config**: `.opencode/opencode.jsonc` (will rename to `.pentestcode/`)
+- **Config**: `.pentestcode/pentestcode.jsonc`
 - **Skills**: `skills/` directory, discovered via `**/SKILL.md` glob
 
 ## Commands
@@ -119,7 +119,7 @@ bun turbo typecheck
 - **EngagementStore.node** registered in V1 app-runtime (`app-runtime.ts`) and V2 location-services (`location-services.ts`)
 - **Engagement context injected** into V1 system prompt (`prompt.ts`) — compact JSON with phase, mode, hosts, vulns
 - **Auto-load**: session start loads last engagement from `.last` file
-- **Skills config**: `.opencode/opencode.jsonc` has `skills.paths: ["./skills"]`
+- **Skills config**: `.pentestcode/pentestcode.jsonc` has `skills.paths: ["./skills"]`. Relative skill paths resolve against the session cwd, each config-dir project root, and the global `~/.pentestcode/skills` home — so bundled skills load regardless of cwd (see `packages/opencode/src/skill/index.ts` `discoverSkills`)
 
 ### Phase 3: Pentest Tools (6 tools, 12 files)
 - **state_query** — query engagement state (11 query types: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements)
