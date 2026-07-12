@@ -44,6 +44,8 @@ export const Parameters = Schema.Struct({
     "add_network_segment",
     "update_network_segment",
     "remove_network_segment",
+    "record_wordlist",
+    "set_pause",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -995,6 +997,54 @@ export const StateUpdateTool = Tool.define(
                 title: `Segment removed: ${id}`,
                 metadata: { id },
                 output: `Network segment "${id}" removed.`,
+              }
+            }
+
+            case "record_wordlist": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const hostIp = d.host_ip as string
+              const port = d.port as number
+              const toolType = d.tool_type as string
+              const wordlistPath = d.wordlist_path as string
+              if (!hostIp || port === undefined || !toolType || !wordlistPath) {
+                return { title: "Error", metadata: {}, output: "Error: host_ip, port, tool_type, wordlist_path are all required for record_wordlist." }
+              }
+              const usage: EngagementSchema.WordlistUsage = {
+                host_ip: hostIp,
+                port,
+                tool_type: toolType as EngagementSchema.WordlistToolType,
+                wordlist_path: wordlistPath,
+                timestamp: new Date().toISOString(),
+                ...(d.results_count !== undefined ? { results_count: d.results_count as number } : {}),
+                ...(d.agent_type ? { agent_type: d.agent_type as string } : {}),
+              }
+              const added = yield* store.addWordlistUsage(usage)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: added ? `Wordlist: ${wordlistPath}` : "Wordlist (duplicate)",
+                metadata: { host_ip: hostIp, port, tool_type: toolType },
+                output: added
+                  ? `Recorded wordlist ${wordlistPath} on ${hostIp}:${port} (${toolType})`
+                  : `Wordlist already recorded for ${hostIp}:${port} (${toolType}): ${wordlistPath}`,
+              }
+            }
+
+            case "set_pause": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const pause = (d.pause ?? d.behavior) as string
+              if (!pause || !["never", "always", "checkpoint"].includes(pause)) {
+                return { title: "Error", metadata: {}, output: "Error: data.pause must be one of: never, always, checkpoint" }
+              }
+              yield* store.setPauseBehavior(pause as EngagementSchema.PauseBehavior)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Pause: ${pause}`,
+                metadata: { pause },
+                output: `Pause on finding set to: ${pause}`,
               }
             }
 

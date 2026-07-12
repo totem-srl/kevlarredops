@@ -18,6 +18,7 @@ import PROMPT_PHASE from "./template/pentest-phase.txt"
 import PROMPT_MODE from "./template/pentest-mode.txt"
 import PROMPT_REPORT from "./template/pentest-report.txt"
 import PROMPT_OBJECTIVES from "./template/pentest-objectives.txt"
+import PROMPT_PAUSE from "./template/pentest-pause.txt"
 import { LegacyEvent } from "@pentestcode/schema/legacy-event"
 
 type State = {
@@ -64,6 +65,7 @@ export const Default = {
   MODE: "mode",
   REPORT: "report",
   OBJECTIVES: "objectives",
+  PAUSE: "pause",
 } as const
 
 export interface Interface {
@@ -167,6 +169,13 @@ const layer = Layer.effect(
         source: "command",
         template: PROMPT_OBJECTIVES,
         hints: hints(PROMPT_OBJECTIVES),
+      }
+      commands[Default.PAUSE] = {
+        name: Default.PAUSE,
+        description: "set pause behavior on findings [never|always|checkpoint]",
+        source: "command",
+        template: PROMPT_PAUSE,
+        hints: hints(PROMPT_PAUSE),
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {

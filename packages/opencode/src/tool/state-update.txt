@@ -43,6 +43,8 @@ Actions and their required data fields:
 - add_network_segment: { cidr: string, name?: string, vlan?: number, gateway?: string, reachable_from?: string[], pivot_host?: string, notes?: string, id?: string }
 - update_network_segment: { id: string, ...any fields from add_network_segment to patch }
 - remove_network_segment: { id: string }
+- record_wordlist: { host_ip: string, port: number, tool_type: "dir_fuzz"|"brute"|"vhost"|"subdomain"|"user_enum"|"param_fuzz"|"password_spray", wordlist_path: string, results_count?: number, agent_type?: string } — track which wordlist was used against which host:port:tool_type. Deduplicates by (host_ip, port, tool_type, wordlist_path) — re-recording same combo returns "duplicate". Max 1000 entries. Use AFTER every fuzzing/brute-force run.
+- set_pause: { pause: "never"|"always"|"checkpoint" } — set pause-on-finding behavior. "never" = continuous (default). "always" = stop after every finding for user direction. "checkpoint" = pause briefly to show cumulative summary, continue unless redirected.
 
 Notes:
 - add_host supports domain_info: { domain?: string, is_dc?: boolean, computer_account?: string, forest?: string }

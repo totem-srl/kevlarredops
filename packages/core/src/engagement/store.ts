@@ -13,6 +13,8 @@ const LAST_FILE = ".last"
 const CHANGELOG_FILE = "changelog.json"
 const DECISIONS_FILE = "decisions.json"
 const AGENT_CONTEXTS_FILE = "agent-contexts.json"
+const WORDLISTS_FILE = "wordlists.json"
+const FINDINGS_FILE = "findings.md"
 
 function mergeServices(
   existing: readonly EngagementSchema.Service[],
@@ -84,6 +86,11 @@ export interface Interface {
   // Interrupt Alerts
   readonly drainInterruptAlerts: () => Effect.Effect<EngagementSchema.Alert[]>
   readonly hasInterruptAlerts: () => Effect.Effect<boolean>
+  // Wordlist Usage Tracking
+  readonly addWordlistUsage: (usage: EngagementSchema.WordlistUsage) => Effect.Effect<boolean>
+  readonly getWordlistUsages: (filter?: { host_ip?: string; port?: number; tool_type?: string }) => Effect.Effect<readonly EngagementSchema.WordlistUsage[]>
+  // Pause Behavior
+  readonly setPauseBehavior: (behavior: EngagementSchema.PauseBehavior) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -104,6 +111,14 @@ function agentContextsFilePath(name: string): string {
   return path.join(ENGAGEMENTS_DIR, name, AGENT_CONTEXTS_FILE)
 }
 
+function wordlistsFilePath(name: string): string {
+  return path.join(ENGAGEMENTS_DIR, name, WORDLISTS_FILE)
+}
+
+function findingsFilePath(name: string): string {
+  return path.join(ENGAGEMENTS_DIR, name, FINDINGS_FILE)
+}
+
 function lastFilePath(): string {
   return path.join(ENGAGEMENTS_DIR, LAST_FILE)
 }
@@ -119,6 +134,7 @@ const layer = Layer.effect(
     const decisionsRef = yield* Ref.make<EngagementSchema.Decision[]>([])
     const agentContextsRef = yield* Ref.make<Record<string, EngagementSchema.AgentContextSummary[]>>({})
     const interruptQueueRef = yield* Ref.make<EngagementSchema.Alert[]>([])
+    const wordlistsRef = yield* Ref.make<EngagementSchema.WordlistUsage[]>([])
     const lastInjectedRef = yield* Ref.make<string | undefined>(undefined)
 
     const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
@@ -204,6 +220,43 @@ const layer = Layer.effect(
       }
     }
 
+    const persistWordlists = (name: string, entries: readonly EngagementSchema.WordlistUsage[]) => {
+      try {
+        const filePath = wordlistsFilePath(name)
+        const dir = path.dirname(filePath)
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        fs.writeFileSync(filePath, JSON.stringify(entries, undefined, 2), { encoding: "utf-8", mode: 0o600 })
+      } catch {
+        // wordlist persistence is best-effort
+      }
+    }
+
+    const loadWordlists = (name: string): EngagementSchema.WordlistUsage[] => {
+      try {
+        const filePath = wordlistsFilePath(name)
+        if (!fs.existsSync(filePath)) return []
+        const raw = fs.readFileSync(filePath, "utf-8")
+        return JSON.parse(raw) as EngagementSchema.WordlistUsage[]
+      } catch {
+        return []
+      }
+    }
+
+    const appendFinding = (name: string, entry: string) => {
+      try {
+        const filePath = findingsFilePath(name)
+        const dir = path.dirname(filePath)
+        fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+        if (!fs.existsSync(filePath)) {
+          const header = `# Findings Journal\n\n*Auto-generated during engagement "${name}"*\n\n---\n\n`
+          fs.writeFileSync(filePath, header, { encoding: "utf-8", mode: 0o600 })
+        }
+        fs.appendFileSync(filePath, entry + "\n\n", { encoding: "utf-8" })
+      } catch {
+        // findings journal is best-effort
+      }
+    }
+
     const persist = (state: EngagementSchema.State) =>
       Effect.sync(() => {
         const filePath = stateFilePath(state.name)
@@ -247,6 +300,8 @@ const layer = Layer.effect(
         if (decisions.length > 0) persistDecisions(updated.name, decisions)
         const contexts = yield* Ref.get(agentContextsRef)
         if (Object.keys(contexts).length > 0) persistAgentContexts(updated.name, contexts)
+        const wordlists = yield* Ref.get(wordlistsRef)
+        if (wordlists.length > 0) persistWordlists(updated.name, wordlists)
       }),
 
       create: Effect.fn("EngagementStore.create")(function* (name) {
@@ -270,6 +325,7 @@ const layer = Layer.effect(
         yield* Ref.set(decisionsRef, [])
         yield* Ref.set(agentContextsRef, {})
         yield* Ref.set(interruptQueueRef, [])
+        yield* Ref.set(wordlistsRef, [])
         yield* persist(state)
         yield* logChange("create_engagement", "engagement", state.id, `Created engagement "${name}"`)
         return state
@@ -283,6 +339,7 @@ const layer = Layer.effect(
           yield* Ref.set(decisionsRef, loadDecisions(name))
           yield* Ref.set(agentContextsRef, loadAgentContexts(name))
           yield* Ref.set(interruptQueueRef, [])
+          yield* Ref.set(wordlistsRef, loadWordlists(name))
         }
         return state
       }),
@@ -343,6 +400,23 @@ const layer = Layer.effect(
         } else {
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: [...host.vulns, vuln] } } })
           yield* logChange("add_vuln", "vuln", vuln.id, `[${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title} on ${hostIp}${vuln.confidence !== undefined ? ` conf:${vuln.confidence}` : ""}`)
+          const sevIcon: Record<string, string> = { critical: "!!!", high: "!!", medium: "!", low: ".", info: "i" }
+          const findingLines = [
+            `## ${sevIcon[vuln.severity ?? "medium"] ?? "!"} [${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title}`,
+            `**Time**: ${new Date().toISOString()}`,
+            `**Host**: ${hostIp}${vuln.service_port ? `:${vuln.service_port}` : ""}`,
+            `**Status**: ${vuln.status ?? "suspected"}${vuln.confidence !== undefined ? ` (confidence: ${(vuln.confidence * 100).toFixed(0)}%)` : ""}`,
+            ...(vuln.description ? [`**Description**: ${vuln.description}`] : []),
+            ...(vuln.evidence ? [`**Evidence**: \`${vuln.evidence}\``] : []),
+            ...(vuln.evidence_items?.length ? [
+              `**Evidence Chain**:`,
+              ...vuln.evidence_items.map((e) =>
+                `- \`${e.tool}\`${e.source_agent ? ` (${e.source_agent})` : ""}: ${e.command ?? "(no command)"}${e.verification_status ? ` [${e.verification_status}]` : ""}`
+              ),
+            ] : []),
+            `---`,
+          ]
+          appendFinding(current.name, findingLines.join("\n"))
         }
       }),
 
@@ -383,6 +457,17 @@ const layer = Layer.effect(
         })
         if (isNew) {
           yield* logChange("add_credential", "credential", id, `Credential ${cred.username ?? id} (${cred.cred_type ?? "password"})${cred.confidence !== undefined ? ` conf:${cred.confidence}` : ""}`)
+          const findingLines = [
+            `## Credential Found: ${cred.username ?? id}`,
+            `**Time**: ${new Date().toISOString()}`,
+            `**Type**: ${cred.cred_type ?? "password"}`,
+            `**Source**: ${cred.source ?? "unknown"}`,
+            ...(cred.valid_for?.length ? [`**Valid For**: ${cred.valid_for.join(", ")}`] : []),
+            ...(cred.confidence !== undefined ? [`**Confidence**: ${(cred.confidence * 100).toFixed(0)}%`] : []),
+            ...(cred.domain ? [`**Domain**: ${cred.domain}`] : []),
+            `---`,
+          ]
+          appendFinding(current.name, findingLines.join("\n"))
         }
       }),
 
@@ -411,6 +496,17 @@ const layer = Layer.effect(
         } else {
           yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: [...host.access, access] } } })
           yield* logChange("add_access", "access", hostIp, `${access.access_type} as ${access.username} (${access.level ?? "user"}) on ${hostIp}${access.confidence !== undefined ? ` conf:${access.confidence}` : ""}`)
+          const findingLines = [
+            `## Access Gained: ${hostIp}`,
+            `**Time**: ${new Date().toISOString()}`,
+            `**Type**: ${access.access_type}`,
+            `**User**: ${access.username}`,
+            `**Level**: ${access.level ?? "user"}`,
+            ...(access.details ? [`**Details**: ${access.details}`] : []),
+            ...(access.credential_id ? [`**Credential**: ${access.credential_id}`] : []),
+            `---`,
+          ]
+          appendFinding(current.name, findingLines.join("\n"))
         }
       }),
 
@@ -733,6 +829,47 @@ const layer = Layer.effect(
       hasInterruptAlerts: Effect.fn("EngagementStore.hasInterruptAlerts")(function* () {
         const alerts = yield* Ref.get(interruptQueueRef)
         return alerts.length > 0
+      }),
+
+      // --- Wordlist Usage Tracking ---
+      addWordlistUsage: Effect.fn("EngagementStore.addWordlistUsage")(function* (usage) {
+        const current = yield* Ref.get(wordlistsRef)
+        const isDupe = current.some(
+          (w) => w.host_ip === usage.host_ip && w.port === usage.port && w.tool_type === usage.tool_type && w.wordlist_path === usage.wordlist_path,
+        )
+        if (isDupe) return false
+        const updated = [...current, usage]
+        const trimmed = updated.length > EngagementSchema.WORDLISTS_MAX_ENTRIES
+          ? updated.slice(updated.length - EngagementSchema.WORDLISTS_MAX_ENTRIES)
+          : updated
+        yield* Ref.set(wordlistsRef, trimmed)
+        yield* logChange("record_wordlist", "wordlist", `${usage.host_ip}:${usage.port}`, `${usage.tool_type}: ${usage.wordlist_path}`)
+        return true
+      }),
+
+      getWordlistUsages: Effect.fn("EngagementStore.getWordlistUsages")(function* (filter) {
+        let entries: readonly EngagementSchema.WordlistUsage[] = yield* Ref.get(wordlistsRef)
+        if (filter?.host_ip) {
+          const ip = filter.host_ip
+          entries = entries.filter((w) => w.host_ip === ip)
+        }
+        if (filter?.port !== undefined) {
+          const p = filter.port
+          entries = entries.filter((w) => w.port === p)
+        }
+        if (filter?.tool_type) {
+          const tt = filter.tool_type
+          entries = entries.filter((w) => w.tool_type === tt)
+        }
+        return entries
+      }),
+
+      // --- Pause Behavior ---
+      setPauseBehavior: Effect.fn("EngagementStore.setPauseBehavior")(function* (behavior) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        yield* Ref.set(stateRef, { ...current, pause_on_finding: behavior })
+        yield* logChange("set_pause", "pause", behavior, `Pause on finding: ${behavior}`)
       }),
     })
   }),

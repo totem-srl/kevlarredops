@@ -21,4 +21,5 @@ Supported query types:
 - alerts: Show active (un-acknowledged, non-expired) alerts from all agents
 - sessions: Show live sessions — shells, tunnels, listeners, proxies currently alive
 - segments: Show discovered network segments, VLANs, pivot paths
+- wordlists: Show wordlists already used (filter: "host_ip" or "host_ip:port" or "host_ip:port:tool_type"). Prevents repeating wordlists on the same target:port:tool_type combination.
 - ooda: Full situation-awareness context — changes, coverage gaps, alerts, sessions, segments, tasks, objectives

@@ -72,3 +72,9 @@ for p in .git/HEAD .env .DS_Store wp-config.php.bak web.config robots.txt sitema
   curl -sI "http://<t>/$p"
 done
 ```
+
+## Output Rules
+- Always use quiet/filtered output flags. Only show successful results.
+- For gobuster/ffuf: use `-q -n --no-error` or `-mc` match codes to suppress noise.
+- Redirect large output to files. Never paste >50 lines of raw tool output.
+- Use `gobuster_parse` and `nuclei_parse` for auto-processing.

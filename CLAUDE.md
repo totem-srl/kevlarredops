@@ -258,7 +258,9 @@ bun turbo typecheck
 ├── changelog.json      # deletable, retention 500
 ├── decisions.json      # Wave 3 — deletable, retention 100
 ├── agent-contexts.json # Wave 3 — deletable, retention 10 per agent type
-└── evidence/           # Wave 3 — deletable folder, files per vuln_id
+├── evidence/           # Wave 3 — deletable folder, files per vuln_id
+├── wordlists.json      # UX — deletable, retention 1000
+└── findings.md         # UX — deletable, auto-appended markdown
 ```
 
 ## What Was Done (Competitive Gap Closure — 2026-07-09)
@@ -307,6 +309,56 @@ bun turbo typecheck
 - [x] **Context Size Reduction** — `toCompactContext()` now has caps: 10 vulns/host (by severity), 15 services/host, 30 relationships, 10 objectives. OODA fields (alerts/sessions/segments) excluded by default (already in `toOODAContext()`). Conditional injection: full state on step 1 + every 8th step, summary-only on other steps. ~75% token reduction.
 - [x] **Parallel Dispatch Strengthening** — added CORRECT/WRONG examples with multi-tool-use blocks to orchestrator-mode.txt and pentest.txt. Explicit anti-pattern: "dispatch one per turn → WRONG".
 
+## What Was Done (Community Feedback UX — 2026-07-12)
+
+### Wordlist Usage Tracking
+- [x] `WordlistUsage` schema: `(host_ip, port, tool_type, wordlist_path)` granularity — tracks what was tried where
+- [x] `WordlistToolType`: dir_fuzz, brute, vhost, subdomain, user_enum, param_fuzz, password_spray
+- [x] `wordlists.json` persistence (deletable, retention 1000) — loaded/saved alongside engagement
+- [x] `addWordlistUsage()` dedup by full tuple, `getWordlistUsages()` with optional filter
+- [x] `state_update record_wordlist` / `state_query wordlists` — tools for agents to track usage
+- [x] `wordlistSummary()` helper groups by host:port → tool_type → paths
+- [x] `<wordlist-usage>` context injection in prompt.ts (capped at 50 entries)
+- [x] "Wordlist Tracking — MANDATORY" sections in pentest.txt, enumerator.txt, webapp.txt, infrastructure.txt
+
+### Findings Journal (findings.md)
+- [x] `appendFinding()` in store.ts — write-only append, no Ref, best-effort I/O
+- [x] Auto-appended on `addVuln` (severity icon, title, host, status, evidence chain)
+- [x] Auto-appended on `addCredential` (type, source, valid_for, domain)
+- [x] Auto-appended on `addAccess` (type, user, level, details)
+- [x] Human-readable markdown with timestamps — reviewable during sessions
+- [x] Mentioned in pentest.txt so agent tells user about it
+
+### Pause on Finding
+- [x] `PauseBehavior` type: "never" | "always" | "checkpoint" — orthogonal to mode (auto/free/guided)
+- [x] `pause_on_finding` field on State (optional, default "never")
+- [x] `setPauseBehavior()` in store, `state_update set_pause` action
+- [x] `/pause` slash command (template + registration in command/index.ts)
+- [x] `pauseDirectives` in prompt.ts — injected after engagement context when not "never"
+- [x] Subagents do NOT pause individually — findings flow to coordinator via alerts
+
+### Output Overflow Prevention
+- [x] "Output Management — MANDATORY" section in pentest.txt with 15+ tool-specific patterns
+- [x] "Context Management — MANDATORY" sections in all subagent prompts (scanner, enumerator, exploiter, infrastructure, webapp, post-exploit)
+- [x] "Output Rules" reminders in 4 skill files (enumeration, exploitation, smb, web-server)
+
+### Slash Command Discoverability
+- [x] "Available Commands — Mention to Users" section in pentest.txt
+- [x] Contextual `<command-hints>` injection in prompt.ts based on engagement state
+- [x] 3 new tips in TUI tips-view.tsx (/creds, /mode, /pause)
+
+### Storage Layout (updated)
+```
+~/.pentestcode/engagements/<name>/
+├── state.json          # core (compact)
+├── changelog.json      # deletable, retention 500
+├── decisions.json      # deletable, retention 100
+├── agent-contexts.json # deletable, retention 10 per agent type
+├── evidence/           # deletable folder, files per vuln_id
+├── wordlists.json      # NEW — deletable, retention 1000
+└── findings.md         # NEW — deletable, auto-appended markdown
+```
+
 ## What Remains (TODO)
 
 ### Wave 3: Strategy (remaining items)
@@ -324,6 +376,7 @@ bun turbo typecheck
 - [x] Network segmentation model — `NetworkSegment` schema + `attack_path_suggest` tool. VLANs, reachable networks, pivot hosts tracked in state and used for path suggestions.
 
 ### Slash Commands
+- [x] `/pause` — set pause behavior on findings (never/always/checkpoint)
 - [ ] `/playbook` — load and follow a playbook interactively
 - [ ] `/export` — export engagement state to external formats
 

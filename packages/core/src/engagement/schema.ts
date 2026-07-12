@@ -27,6 +27,9 @@ export type PentestPhase = typeof PentestPhase.Type
 export const PentestMode = Schema.Literals(["auto", "free", "guided"])
 export type PentestMode = typeof PentestMode.Type
 
+export const PauseBehavior = Schema.Literals(["never", "always", "checkpoint"])
+export type PauseBehavior = typeof PauseBehavior.Type
+
 export const TaskNodeStatus = Schema.Literals(["pending", "in_progress", "done", "abandoned"])
 export type TaskNodeStatus = typeof TaskNodeStatus.Type
 
@@ -321,6 +324,7 @@ export const State = Schema.Struct({
   alerts: Schema.optional(Schema.Array(Alert)),
   live_sessions: Schema.optional(Schema.Array(LiveSession)),
   network_segments: Schema.optional(Schema.Array(NetworkSegment)),
+  pause_on_finding: Schema.optional(PauseBehavior),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -353,6 +357,55 @@ export const AgentContextSummary = Schema.Struct({
 export type AgentContextSummary = typeof AgentContextSummary.Type
 
 export const AGENT_CONTEXT_MAX_PER_TYPE = 10
+
+// --- Wordlist Usage Tracking ---
+
+export const WordlistToolType = Schema.Literals([
+  "dir_fuzz", "brute", "vhost", "subdomain",
+  "user_enum", "param_fuzz", "password_spray",
+])
+export type WordlistToolType = typeof WordlistToolType.Type
+
+export const WordlistUsage = Schema.Struct({
+  host_ip: Schema.String,
+  port: Schema.Number,
+  tool_type: WordlistToolType,
+  wordlist_path: Schema.String,
+  timestamp: Schema.String,
+  results_count: Schema.optional(Schema.Number),
+  agent_type: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.WordlistUsage" })
+export type WordlistUsage = typeof WordlistUsage.Type
+
+export const WORDLISTS_MAX_ENTRIES = 1000
+
+export function wordlistSummary(usages: readonly WordlistUsage[], hostIp?: string, port?: number): string {
+  let filtered = [...usages]
+  if (hostIp) filtered = filtered.filter((u) => u.host_ip === hostIp)
+  if (port !== undefined) filtered = filtered.filter((u) => u.port === port)
+
+  if (filtered.length === 0) return "No wordlists used yet."
+
+  const byTarget = new Map<string, WordlistUsage[]>()
+  for (const u of filtered) {
+    const key = `${u.host_ip}:${u.port}`
+    const list = byTarget.get(key) ?? []
+    list.push(u)
+    byTarget.set(key, list)
+  }
+
+  const lines: string[] = []
+  for (const [target, entries] of byTarget) {
+    const byTool = new Map<string, string[]>()
+    for (const e of entries) {
+      const list = byTool.get(e.tool_type) ?? []
+      list.push(e.wordlist_path)
+      byTool.set(e.tool_type, list)
+    }
+    lines.push(`${target}: ${[...byTool.entries()].map(([t, wl]) => `${t}=[${wl.join(",")}]`).join(" ")}`)
+  }
+  return lines.join("\n")
+}
 
 export function toDiffContext(entries: ChangelogEntry[], maxEntries = 20): string | undefined {
   if (entries.length === 0) return undefined

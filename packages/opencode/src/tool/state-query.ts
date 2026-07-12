@@ -27,9 +27,10 @@ export const Parameters = Schema.Struct({
     "sessions",
     "segments",
     "ooda",
+    "wordlists",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -443,6 +444,25 @@ export const StateQueryTool = Tool.define(
             case "ooda": {
               const ooda = EngagementSchema.toOODAContext(state, [])
               return { title: "OODA Context", metadata: {}, output: ooda }
+            }
+
+            case "wordlists": {
+              let hostIp: string | undefined
+              let port: number | undefined
+              let toolType: string | undefined
+              if (params.filter) {
+                const parts = params.filter.split(":")
+                hostIp = parts[0] || undefined
+                if (parts[1]) port = parseInt(parts[1], 10)
+                if (parts[2]) toolType = parts[2]
+              }
+              const usages = yield* store.getWordlistUsages({ host_ip: hostIp, port, tool_type: toolType })
+              if (usages.length === 0) {
+                const ctx = hostIp ? ` for ${hostIp}${port !== undefined ? `:${port}` : ""}` : ""
+                return { title: "Wordlists", metadata: { count: 0 }, output: `No wordlist usage recorded${ctx}. All wordlists are available.` }
+              }
+              const summary = EngagementSchema.wordlistSummary(usages, hostIp, port)
+              return { title: "Wordlists", metadata: { count: usages.length }, output: `Wordlists used (${usages.length}):\n${summary}` }
             }
 
             case "full": {

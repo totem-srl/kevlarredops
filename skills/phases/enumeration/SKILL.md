@@ -85,3 +85,8 @@ Move to VULN_ASSESS when:
 - Web directories enumerated
 - Protocol-specific enumeration complete
 - All findings recorded in engagement state
+
+## Output Rules
+- Always use quiet/filtered output flags. Only show successful results.
+- Redirect large output to files. Never paste >50 lines of raw tool output.
+- Use parser tools (nmap_parse, cme_parse, gobuster_parse, nuclei_parse) for auto-processing.

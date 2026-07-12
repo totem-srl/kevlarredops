@@ -81,3 +81,9 @@ smbget -R smb://<target>/<share> -U <user>%<password>
 # Spider shares for interesting files
 crackmapexec smb <target> -u <user> -p <password> --spider <share> --pattern "passw|secret|cred|key|config"
 ```
+
+## Output Rules
+- Always use quiet/filtered output flags. Only show successful results.
+- For netexec/crackmapexec: pipe through `grep '[+]'` for brute-force runs.
+- Redirect large output to files. Never paste >50 lines of raw tool output.
+- Use `cme_parse` for auto-processing netexec output.

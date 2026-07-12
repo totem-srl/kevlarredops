@@ -67,6 +67,23 @@ const modeDirectives: Record<string, string> = {
   guided: "Mode: GUIDED — Walk through each step with explanations. Before executing any action, explain what you'll do, why, and what to expect. After each result, explain what it means and present options for the next step.",
 }
 
+const pauseDirectives: Record<string, string> = {
+  always: `PAUSE BEHAVIOR: ALWAYS
+After recording ANY vulnerability (add_vuln), credential (add_credential), or access (add_access):
+1. STOP all further work immediately
+2. Present the finding: severity, target, evidence, what it means
+3. Summarize progress so far
+4. Wait for user to say "continue" or give new direction
+Do NOT proceed until the user responds.`,
+  checkpoint: `PAUSE BEHAVIOR: CHECKPOINT
+After recording ANY vulnerability (add_vuln), credential (add_credential), or access (add_access):
+1. Present the finding with severity and evidence
+2. Show cumulative summary of ALL findings (use state_query summary)
+3. Ask: "Continue with current approach, or adjust?"
+4. If user says continue or doesn't redirect — proceed autonomously
+Between checkpoints, work autonomously.`,
+}
+
 function phaseTransitionHint(state: EngagementSchema.State): string | undefined {
   const s = EngagementSchema.summary(state)
   switch (state.current_phase) {
@@ -1416,7 +1433,47 @@ const layer = Layer.effect(
 
                   lines.push("")
                   lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.")
+
+                  const cmdHints: string[] = []
+                  const hostCount = Object.keys(state.hosts).length
+                  const vulnCount = Object.values(state.hosts).reduce((sum, h) => sum + h.vulns.length, 0)
+                  const credCount = Object.keys(state.credentials).length
+                  if (step <= 2 && hostCount === 0) {
+                    cmdHints.push("Tip for user: /scope to set targets, /mode to choose execution style")
+                  }
+                  if (vulnCount > 0 && vulnCount <= 3) {
+                    cmdHints.push("Tip for user: /vulns shows all findings, /report generates a report")
+                  }
+                  if (credCount > 0 && credCount <= 2) {
+                    cmdHints.push("Tip for user: /creds shows all captured credentials")
+                  }
+                  if (cmdHints.length > 0) {
+                    lines.push("")
+                    lines.push("<command-hints>")
+                    lines.push("When relevant, naturally mention these commands to the user:")
+                    for (const h of cmdHints) lines.push(`  ${h}`)
+                    lines.push("</command-hints>")
+                  }
+
+                  // Wordlist usage context
+                  const wordlistUsages = yield* engagement.getWordlistUsages()
+                  if (wordlistUsages.length > 0) {
+                    const wlSummary = EngagementSchema.wordlistSummary(wordlistUsages.slice(-50))
+                    lines.push("")
+                    lines.push("<wordlist-usage>")
+                    lines.push("Wordlists already used (DO NOT repeat on same target:port:tool_type):")
+                    lines.push(wlSummary)
+                    lines.push("</wordlist-usage>")
+                  }
+
                   lines.push("</pentest-engagement>")
+
+                  // Pause behavior directive
+                  const pauseBehavior = state.pause_on_finding ?? "never"
+                  if (pauseBehavior !== "never" && pauseDirectives[pauseBehavior]) {
+                    lines.push("", pauseDirectives[pauseBehavior]!)
+                  }
+
                   if (state.mode === "auto" && agent.name === "pentest") {
                     lines.push("", ORCHESTRATOR_MODE)
                   }
