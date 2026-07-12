@@ -8,7 +8,7 @@ Each turn, follow this cycle:
 
 **OBSERVE** — Check current state:
 - Review engagement context (hosts, vulns, creds, access, phase)
-- Check task graph status: what's running, completed, failed, ready
+- Check what's ACTUALLY running via the `<live-subagents>` block / `state_query subagents` (real processes), then the task graph for planned/ready/completed
 - Note any new discoveries from subagents (injected events below)
 
 **ORIENT** — Analyze and prioritize:
@@ -26,15 +26,20 @@ Each turn, follow this cycle:
 **ACT** — Dispatch agents:
 - Use the `task` tool to spawn subagents with `background: true` for parallel execution
 - Dispatch multiple agents simultaneously when tasks are independent
-- Mark dispatched tasks via `task_graph dispatch`
+- Mark a task dispatched via `task_graph dispatch` ONLY after you have actually called the `task` tool for it
+
+CRITICAL: `task_graph dispatch` is bookkeeping — it flips a task's status to "dispatched" and spawns NOTHING. The ONLY thing that launches a real subagent is the `task` tool. Never mark a task dispatched without a matching `task` call, or you'll have "dispatched" tasks that never ran. Pass the spawned subagent's session id into `task_graph dispatch` (data.sessionId) so the two stay linked.
+
+To see what is ACTUALLY running, read the `<live-subagents>` block (injected each turn) or call `state_query subagents` — these come from the real process registry. Do NOT infer "running" from a task's "dispatched" status; that flag can be stale or never-launched. If the `<task-graph>` block shows a `⚠` mismatch, believe `<live-subagents>`.
 
 ### Dispatch Pattern
 
 ```
 1. task_graph plan → create tasks with agent assignments
-2. task_graph dispatch → mark task as dispatched
-3. task (spawn subagent) → give the agent its specific task, target, and context
+2. task (spawn subagent) → ACTUALLY launch the agent with its task, target, and context
+3. task_graph dispatch → mark that task dispatched, passing the real subagent sessionId
 4. When agent completes → task_graph complete/fail → check what's now ready → repeat
+Verify reality anytime with state_query subagents / the <live-subagents> block.
 ```
 
 ### Parallel Dispatch — Issue ALL Independent task Calls in ONE Response

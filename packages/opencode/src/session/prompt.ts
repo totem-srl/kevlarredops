@@ -59,6 +59,7 @@ import { LLMEvent } from "@pentestcode/llm"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
+import { BackgroundJob } from "@/background/job"
 import ORCHESTRATOR_MODE from "./prompt/orchestrator-mode.txt"
 
 const modeDirectives: Record<string, string> = {
@@ -193,6 +194,7 @@ const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const engagement = yield* EngagementStore.Service
+    const background = yield* BackgroundJob.Service
     const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
@@ -1379,6 +1381,13 @@ const layer = Layer.effect(
                       `  hosts:${ss.hosts_discovered} compromised:${ss.hosts_compromised} vulns:${ss.vulnerabilities} creds:${ss.credentials} flags:${ss.flags} phase:${ss.current_phase}`,
                     )
                   }
+                  // Real subagent liveness from the background-job registry —
+                  // the source of truth, unlike task-graph's self-reported status.
+                  const liveJobs = (yield* background.list()).filter(
+                    (j) => j.type === "task" && j.metadata?.parentSessionId === sessionID,
+                  )
+                  const liveRunning = liveJobs.filter((j) => j.status === "running")
+
                   const taskGraph = yield* engagement.getTaskGraph()
                   const taskEntries = Object.values(taskGraph)
                   if (taskEntries.length > 0) {
@@ -1391,12 +1400,37 @@ const layer = Layer.effect(
                       `  Total: ${taskEntries.length} | ${Object.entries(counts).map(([k, v]) => `${k}:${v}`).join(" ")}`,
                     )
                     if (running.length > 0) {
-                      lines.push(`  Active: ${running.map((t) => `${t.id}→${t.assignedAgent ?? "?"}`).join(", ")}`)
+                      lines.push(`  Active (self-reported): ${running.map((t) => `${t.id}→${t.assignedAgent ?? "?"}`).join(", ")}`)
+                      if (running.length > liveRunning.length) {
+                        lines.push(
+                          `  ⚠ ${running.length} task(s) marked dispatched/running but only ${liveRunning.length} subagent(s) actually running. task_graph dispatch does NOT spawn — some were never launched via the task tool, or already ended. Verify with state_query subagents / the <live-subagents> block below.`,
+                        )
+                      }
                     }
                     if (ready.length > 0) {
                       lines.push(`  Ready to dispatch: ${ready.map((t) => t.id).join(", ")}`)
                     }
                     lines.push("</task-graph>")
+                  }
+
+                  if (liveJobs.length > 0) {
+                    lines.push("", "<live-subagents>", "REAL subagent processes this session (trust this over task-graph status):")
+                    if (liveRunning.length > 0) {
+                      lines.push("  RUNNING:")
+                      for (const j of liveRunning) {
+                        const sid = typeof j.metadata?.sessionId === "string" ? j.metadata.sessionId : j.id
+                        lines.push(`    - ${j.title ?? "task"} (session ${sid})`)
+                      }
+                    }
+                    const finished = liveJobs.filter((j) => j.status !== "running").slice(-5)
+                    if (finished.length > 0) {
+                      lines.push("  RECENTLY FINISHED:")
+                      for (const j of finished) {
+                        const sid = typeof j.metadata?.sessionId === "string" ? j.metadata.sessionId : j.id
+                        lines.push(`    - [${j.status}] ${j.title ?? "task"} (session ${sid})`)
+                      }
+                    }
+                    lines.push("</live-subagents>")
                   }
                   const decisions = yield* engagement.getDecisions(10)
                   if (decisions.length > 0) {
@@ -1849,6 +1883,7 @@ export const node = LayerNode.make({
     RuntimeFlags.node,
     Database.node,
     EngagementStore.node,
+    BackgroundJob.node,
   ],
 })
 

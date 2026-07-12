@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { BackgroundJob } from "@/background/job"
 import DESCRIPTION from "./state-query.txt"
 import * as Tool from "./tool"
 
@@ -28,9 +29,10 @@ export const Parameters = Schema.Struct({
     "segments",
     "ooda",
     "wordlists",
+    "subagents",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -70,11 +72,43 @@ export const StateQueryTool = Tool.define(
   "state_query",
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
+    const background = yield* BackgroundJob.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
-      execute: (params: Schema.Schema.Type<typeof Parameters>, _ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
+      execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context): Effect.Effect<Tool.ExecuteResult> =>
         Effect.gen(function* () {
+          // Live subagent processes for THIS session -- session-scoped, not
+          // engagement-scoped, so handle before the loaded-state guard. Sourced
+          // from the real background-job registry, not the self-reported task graph.
+          if (params.query_type === "subagents") {
+            const jobs = (yield* background.list()).filter(
+              (j) => j.type === "task" && j.metadata?.parentSessionId === ctx.sessionID,
+            )
+            if (jobs.length === 0) {
+              return {
+                title: "Subagents",
+                metadata: { count: 0 },
+                output:
+                  "No subagents running or recently finished this session. (task_graph 'dispatched' status does NOT mean a subagent is running — you must launch one with the task tool.)",
+              }
+            }
+            const running = jobs.filter((j) => j.status === "running")
+            const finished = jobs.filter((j) => j.status !== "running")
+            const render = (j: BackgroundJob.Info) => {
+              const sid = typeof j.metadata?.sessionId === "string" ? j.metadata.sessionId : j.id
+              return `  - [${j.status}] ${j.title ?? "task"} (session ${sid})${j.error ? ` -- ${j.error}` : ""}`
+            }
+            const out: string[] = []
+            if (running.length > 0) out.push(`RUNNING (${running.length}):`, ...running.map(render))
+            if (finished.length > 0) out.push(`FINISHED (${finished.length}):`, ...finished.map(render))
+            return {
+              title: `Subagents: ${running.length} running, ${finished.length} finished`,
+              metadata: { running: running.length, finished: finished.length },
+              output: out.join("\n"),
+            }
+          }
+
           // Handle engagements query separately -- doesn't require loaded state
           if (params.query_type === "engagements") {
             const engagements = yield* store.listEngagements()

@@ -224,9 +224,15 @@ if (Script.release) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
     }
   }
+  // Bundle the skills tree so install.sh can drop it into ~/.pentestcode/skills.
+  // The archive holds the CONTENTS of skills/ (services/, phases/, playbooks/)
+  // so extracting into ~/.pentestcode/skills yields ~/.pentestcode/skills/services/...
+  // which discovery scans.
+  const skillsDir = path.resolve(dir, "../../skills")
+  const distDir = path.resolve(dir, "dist")
+  await $`tar -czf ${distDir}/skills.tar.gz -C ${skillsDir} .`
   await $`cp ./script/install.sh ./dist/install.sh`
-  await $`cp ./script/install.ps1 ./dist/install.ps1`
-  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz ./dist/install.sh ./dist/install.ps1 --clobber --repo ${process.env.GH_REPO}`
+  await $`gh release upload v${Script.version} ./dist/*.zip ./dist/*.tar.gz ./dist/install.sh --clobber --repo ${process.env.GH_REPO}`
 }
 
 export { binaries }

@@ -48,7 +48,23 @@ main() {
   mv "$tmpdir/${BINARY}"* "$INSTALL_DIR/${BINARY}"
   chmod +x "$INSTALL_DIR/${BINARY}"
 
-  printf "  Installed to %s/%s\n\n" "$INSTALL_DIR" "$BINARY"
+  printf "  Installed to %s/%s\n" "$INSTALL_DIR" "$BINARY"
+
+  # Skills — bundled attack knowledge. Best-effort: keep current on each upgrade,
+  # but never fail the whole install if the archive is missing (older releases).
+  skills_dir="$HOME/.pentestcode/skills"
+  skills_url="https://github.com/${REPO}/releases/download/v${version}/skills.tar.gz"
+  if curl -fsSL "$skills_url" -o "$tmpdir/skills.tar.gz" 2>/dev/null; then
+    mkdir -p "$skills_dir"
+    if tar -xzf "$tmpdir/skills.tar.gz" -C "$skills_dir" 2>/dev/null; then
+      printf "  Skills installed to %s (editable)\n" "$skills_dir"
+    else
+      printf "  Warning: could not extract skills archive; skipping\n"
+    fi
+  else
+    printf "  Note: no skills archive for this release; skipping\n"
+  fi
+  printf "\n"
 
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
     shell_name=$(basename "${SHELL:-/bin/sh}")

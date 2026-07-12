@@ -16,7 +16,6 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@pentestcode/core/database/database"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
-import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -167,12 +166,14 @@ function formatOtherAgentsWork(contexts: EngagementSchema.AgentContextSummary[])
   return lines.join("\n")
 }
 
-// Subagents currently running, so a fresh agent knows what's in progress and
-// picks different work rather than colliding with a live sibling.
-function formatInFlightSiblings(tasks: TaskGraph.TaskNode[]): string {
-  const lines: string[] = ["<in-flight-agents>", "These tasks are dispatched/running RIGHT NOW — do NOT duplicate them:"]
-  for (const t of tasks) {
-    lines.push(`  - ${t.id} [${t.status}]${t.assignedAgent ? ` @${t.assignedAgent}` : ""}: ${t.description}${t.target ? ` (${t.target})` : ""}`)
+// Subagents ACTUALLY running right now (from the live background-job registry,
+// not the self-reported task graph), so a fresh agent picks different work
+// rather than colliding with a live sibling.
+function formatInFlightSiblings(jobs: BackgroundJob.Info[]): string {
+  const lines: string[] = ["<in-flight-agents>", "Subagents running RIGHT NOW — do NOT duplicate their work:"]
+  for (const j of jobs) {
+    const sid = typeof j.metadata?.sessionId === "string" ? j.metadata.sessionId : j.id
+    lines.push(`  - [${j.status}] ${j.title ?? "task"} (session ${sid})`)
   }
   lines.push("</in-flight-agents>")
   return lines.join("\n")
@@ -305,8 +306,13 @@ export const TaskTool = Tool.define(
         const priorContexts = yield* engagementStore.getAgentContexts(params.subagent_type, 5)
         const recentContexts = yield* engagementStore.getRecentAgentContexts(10)
         const otherAgents = recentContexts.filter((c) => c.agent_type !== params.subagent_type).slice(0, 6)
-        const graph = yield* engagementStore.getTaskGraph()
-        const inFlight = TaskGraph.getRunning(graph)
+        const inFlight = (yield* background.list()).filter(
+          (j) =>
+            j.type === "task" &&
+            j.status === "running" &&
+            j.metadata?.parentSessionId === ctx.sessionID &&
+            j.metadata?.sessionId !== nextSession.id,
+        )
 
         const blocks: string[] = []
         if (priorContexts.length > 0) blocks.push(formatPriorContext(priorContexts))
