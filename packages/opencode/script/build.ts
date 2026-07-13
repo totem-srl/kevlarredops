@@ -50,6 +50,34 @@ const createEmbeddedWebUIBundle = async () => {
 
 const embeddedFileMap = skipEmbedWebUi ? null : await createEmbeddedWebUIBundle()
 
+// Embed the default ("bundled") skill set into the binary. At runtime
+// src/skill/bundled.ts imports this generated module and seeds
+// ~/.pentestcode/skills/bundled on first run / version bump. Embedding (vs the
+// old skills.tar.gz download) means skills work offline/air-gapped and move in
+// lockstep with the prompts they support. Always embedded — no skip flag.
+const createEmbeddedSkillsBundle = async () => {
+  console.log(`Embedding bundled skills into the binary`)
+  const skillsDir = path.resolve(dir, "../../skills")
+  const files = (await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: skillsDir })))
+    .map((file) => file.replaceAll("\\", "/"))
+    .sort()
+  const imports = files.map((file, i) => {
+    const spec = path.relative(dir, path.join(skillsDir, file)).replaceAll("\\", "/")
+    return `import file_${i} from ${JSON.stringify(spec.startsWith(".") ? spec : `./${spec}`)} with { type: "file" };`
+  })
+  const entries = files.map((file, i) => `  ${JSON.stringify(file)}: file_${i},`)
+  return [
+    `// Bundled skills embedded at build time. Consumed by src/skill/bundled.ts.`,
+    ...imports,
+    `export const version = ${JSON.stringify(Script.version)};`,
+    `export default {`,
+    ...entries,
+    `}`,
+  ].join("\n")
+}
+
+const embeddedSkillsMap = await createEmbeddedSkillsBundle()
+
 const allTargets: {
   os: string
   arch: "arm64" | "x64"
@@ -171,8 +199,17 @@ for (const item of targets) {
       execArgv: [`--user-agent=pentestcode/${Script.version}`, "--use-system-ca", "--"],
       windows: {},
     },
-    files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
-    entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
+    files: {
+      ...(embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {}),
+      "pentestcode-skills.gen.ts": embeddedSkillsMap,
+    },
+    entrypoints: [
+      "./src/index.ts",
+      parserWorker,
+      workerPath,
+      ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : []),
+      "pentestcode-skills.gen.ts",
+    ],
     define: {
       FFF_LIBC: JSON.stringify(item.abi === "musl" ? "musl" : "gnu"),
       OPENCODE_VERSION: `'${Script.version}'`,
@@ -224,13 +261,8 @@ if (Script.release) {
       await $`zip -r ../../${key}.zip *`.cwd(`dist/${key}/bin`)
     }
   }
-  // Bundle the skills tree so install.sh can drop it into ~/.pentestcode/skills.
-  // The archive holds the CONTENTS of skills/ (services/, phases/, playbooks/)
-  // so extracting into ~/.pentestcode/skills yields ~/.pentestcode/skills/services/...
-  // which discovery scans.
-  const skillsDir = path.resolve(dir, "../../skills")
-  const distDir = path.resolve(dir, "dist")
-  await $`tar -czf ${distDir}/skills.tar.gz -C ${skillsDir} .`
+  // Skills are embedded in the binary (see createEmbeddedSkillsBundle) and
+  // seeded to ~/.pentestcode/skills/bundled on first run — no skills.tar.gz asset.
   // install.sh is served from the repo root via raw.githubusercontent (the
   // public curl entrypoint) — do NOT also ship it as a release asset, to avoid
   // two divergent installers.

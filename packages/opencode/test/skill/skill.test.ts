@@ -49,6 +49,44 @@ This skill is loaded from the global home directory.
   )
 }
 
+function skillDoc(name: string, description: string) {
+  return `---
+name: ${name}
+description: ${description}
+---
+
+# ${name}
+
+Body for ${name}.
+`
+}
+
+// Exercises the global skills home (~/.pentestcode/skills) layering. global.home
+// is fixed at layer-construction to the ambient OPENCODE_TEST_HOME (preload.ts),
+// and withHome can't retroactively change it — so fixtures are written under
+// that ambient home and removed afterward. Assertions run in a fresh tmp
+// instance (unrelated cwd) so only the global home tree is under test.
+// `write` creates <home>/.pentestcode/skills/<rel>/SKILL.md.
+const withGlobalSkills = (
+  create: (write: (rel: string, body: string) => Promise<unknown>) => Promise<unknown>,
+  assert: (skill: Skill.Interface) => Effect.Effect<void, any, any>,
+) => {
+  const skillsRoot = path.join(process.env.OPENCODE_TEST_HOME!, ".pentestcode", "skills")
+  return Effect.acquireUseRelease(
+    Effect.promise(() => create((rel, body) => Bun.write(path.join(skillsRoot, rel, "SKILL.md"), body))),
+    () =>
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const skill = yield* Skill.Service
+            yield* assert(skill)
+          }),
+        { git: true },
+      ),
+    () => Effect.promise(() => fs.rm(skillsRoot, { recursive: true, force: true })),
+  )
+}
+
 const withHome = <A, E, R>(home: string, self: Effect.Effect<A, E, R>) =>
   Effect.acquireUseRelease(
     Effect.sync(() => {
@@ -91,13 +129,13 @@ describe("skill", () => {
     }),
   )
 
-  it.live("discovers skills from .opencode/skill/ directory", () =>
+  it.live("discovers skills from .pentestcode/skill/ directory", () =>
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, ".opencode", "skill", "test-skill", "SKILL.md"),
+              path.join(dir, ".pentestcode", "skill", "test-skill", "SKILL.md"),
               `---
 name: test-skill
 description: A test skill for verification.
@@ -130,7 +168,7 @@ Instructions here.
           Effect.gen(function* () {
             yield* Effect.promise(() =>
               Bun.write(
-                path.join(dir, ".opencode", "skill", "dir-skill", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skill", "dir-skill", "SKILL.md"),
                 `---
 name: dir-skill
 description: Skill for dirs test.
@@ -143,7 +181,7 @@ description: Skill for dirs test.
 
             const skill = yield* Skill.Service
             const dirs = yield* skill.dirs()
-            expect(dirs).toContain(path.join(dir, ".opencode", "skill", "dir-skill"))
+            expect(dirs).toContain(path.join(dir, ".pentestcode", "skill", "dir-skill"))
             expect(dirs.length).toBe(1)
           }),
         ),
@@ -151,14 +189,14 @@ description: Skill for dirs test.
     ),
   )
 
-  it.live("discovers multiple skills from .opencode/skill/ directory", () =>
+  it.live("discovers multiple skills from .pentestcode/skill/ directory", () =>
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
           yield* Effect.promise(() =>
             Promise.all([
               Bun.write(
-                path.join(dir, ".opencode", "skill", "skill-one", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skill", "skill-one", "SKILL.md"),
                 `---
 name: skill-one
 description: First test skill.
@@ -168,7 +206,7 @@ description: First test skill.
 `,
               ),
               Bun.write(
-                path.join(dir, ".opencode", "skill", "skill-two", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skill", "skill-two", "SKILL.md"),
                 `---
 name: skill-two
 description: Second test skill.
@@ -196,7 +234,7 @@ description: Second test skill.
         Effect.gen(function* () {
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, ".opencode", "skill", "no-frontmatter", "SKILL.md"),
+              path.join(dir, ".pentestcode", "skill", "no-frontmatter", "SKILL.md"),
               `# No Frontmatter
 
 Just some content without YAML frontmatter.
@@ -217,7 +255,7 @@ Just some content without YAML frontmatter.
         Effect.gen(function* () {
           yield* Effect.promise(() =>
             Bun.write(
-              path.join(dir, ".opencode", "skill", "manual-skill", "SKILL.md"),
+              path.join(dir, ".pentestcode", "skill", "manual-skill", "SKILL.md"),
               `---
 name: manual-skill
 ---
@@ -507,10 +545,10 @@ description: A skill in the .agents/skills directory.
 `,
               ),
               Bun.write(
-                path.join(dir, ".opencode", "skill", "opencode-skill", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skill", "pentestcode-skill", "SKILL.md"),
                 `---
-name: opencode-skill
-description: A skill in the .opencode/skill directory.
+name: pentestcode-skill
+description: A skill in the .pentestcode/skill directory.
 ---
 
 # OpenCode Skill
@@ -521,9 +559,112 @@ description: A skill in the .opencode/skill directory.
 
           const skill = yield* Skill.Service
           const list = (yield* skill.all()).filter((s) => s.location !== "<built-in>")
-          expect(list.map((s) => s.name)).toEqual(["opencode-skill"])
+          expect(list.map((s) => s.name)).toEqual(["pentestcode-skill"])
         }),
       { git: true },
+    ),
+  )
+
+  it.live("layered precedence: user shadows pack shadows bundled", () =>
+    withGlobalSkills(
+      (write) =>
+        Promise.all([
+          write("bundled/dup", skillDoc("dup-skill", "from bundled")),
+          write("packs/p1/dup", skillDoc("dup-skill", "from pack")),
+          write("user/dup", skillDoc("dup-skill", "from user")),
+          write("bundled/only", skillDoc("bundled-only", "unique bundled")),
+        ]),
+      (skill) =>
+        Effect.gen(function* () {
+          const all = yield* skill.all()
+
+          const dup = all.filter((s) => s.name === "dup-skill")
+          expect(dup.length).toBe(1)
+          expect(dup[0].layer).toBe("user")
+          expect(dup[0].description).toBe("from user")
+
+          const only = all.find((s) => s.name === "bundled-only")
+          expect(only).toBeDefined()
+          expect(only!.layer).toBe("bundled")
+        }),
+    ),
+  )
+
+  it.live("skips skills under disabled/", () =>
+    withGlobalSkills(
+      (write) =>
+        Promise.all([
+          write("disabled/x", skillDoc("disabled-skill", "nope")),
+          write("user/y", skillDoc("enabled-skill", "yes")),
+        ]),
+      (skill) =>
+        Effect.gen(function* () {
+          const names = (yield* skill.all()).map((s) => s.name)
+          expect(names).toContain("enabled-skill")
+          expect(names).not.toContain("disabled-skill")
+        }),
+    ),
+  )
+
+  it.live("legacy flat skills load and are shadowed by the user layer", () =>
+    withGlobalSkills(
+      (write) =>
+        Promise.all([
+          // legacy-only skill (pre-layered flat location)
+          write("services/ftp", skillDoc("svc-ftp", "legacy flat")),
+          // same-named skill present in both legacy flat and user/
+          write("services/smb", skillDoc("svc-smb", "legacy flat")),
+          write("user/smb", skillDoc("svc-smb", "user override")),
+        ]),
+      (skill) =>
+        Effect.gen(function* () {
+          const all = yield* skill.all()
+
+          const ftp = all.find((s) => s.name === "svc-ftp")
+          expect(ftp).toBeDefined()
+          expect(ftp!.layer).toBe("legacy")
+
+          const smb = all.filter((s) => s.name === "svc-smb")
+          expect(smb.length).toBe(1)
+          expect(smb[0].layer).toBe("user")
+          expect(smb[0].description).toBe("user override")
+        }),
+    ),
+  )
+
+  it.live("parses optional metadata from SKILL.md frontmatter", () =>
+    withGlobalSkills(
+      (write) =>
+        write(
+          "user/rich",
+          `---
+name: rich-skill
+description: A skill with full metadata.
+id: pentestcode.services.rich
+version: 2.3.1
+author: PentestCode
+tags: [smb, windows]
+dependencies: [svc-ldap]
+requires:
+  pentestcode: ">=0.2.0"
+license: MIT
+---
+
+# Rich Skill
+`,
+        ),
+      (skill) =>
+        Effect.gen(function* () {
+          const item = (yield* skill.all()).find((s) => s.name === "rich-skill")
+          expect(item).toBeDefined()
+          expect(item!.id).toBe("pentestcode.services.rich")
+          expect(item!.version).toBe("2.3.1")
+          expect(item!.author).toBe("PentestCode")
+          expect(item!.tags).toEqual(["smb", "windows"])
+          expect(item!.dependencies).toEqual(["svc-ldap"])
+          expect(item!.requires?.pentestcode).toBe(">=0.2.0")
+          expect(item!.license).toBe("MIT")
+        }),
     ),
   )
 
@@ -554,20 +695,20 @@ description: A skill in the .agents/skills directory.
 `,
               ),
               Bun.write(
-                path.join(dir, ".opencode", "skill", "agent-skill", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skill", "agent-skill", "SKILL.md"),
                 `---
-name: opencode-skill
-description: A skill in the .opencode/skill directory.
+name: pentestcode-skill
+description: A skill in the .pentestcode/skill directory.
 ---
 
 # OpenCode Skill
 `,
               ),
               Bun.write(
-                path.join(dir, ".opencode", "skills", "agent-skill", "SKILL.md"),
+                path.join(dir, ".pentestcode", "skills", "agent-skill", "SKILL.md"),
                 `---
-name: opencode-skill
-description: A skill in the .opencode/skills directory.
+name: pentestcode-skill
+description: A skill in the .pentestcode/skills directory.
 ---
 
 # OpenCode Skill

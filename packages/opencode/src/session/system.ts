@@ -14,6 +14,7 @@ import { LocationServiceMap, locationServiceMapLayer } from "@pentestcode/core/l
 import { Reference } from "@pentestcode/core/reference"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@pentestcode/core/v1/permission"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
 
 export function provider(model: Provider.Model) {
   // PentestCode: always use the pentest prompt as the base, regardless of model
@@ -34,6 +35,7 @@ const layer = Layer.effect(
     const skill = yield* Skill.Service
     const mcp = yield* MCP.Service
     const locations = yield* LocationServiceMap.Service
+    const engagement = yield* EngagementStore.Service
 
     return Service.of({
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
@@ -79,12 +81,18 @@ const layer = Layer.effect(
 
         const list = yield* skill.available(agent)
 
+        // Scale advertising: scope tagged skills to the current engagement phase
+        // so a session doesn't carry every skill's description once there are
+        // hundreds. Untagged skills are always advertised (no-op until adopted).
+        const state = yield* engagement.get().pipe(Effect.catch(() => Effect.succeed(undefined)))
+        const scoped = state?.current_phase ? Skill.scopeByTags(list, [state.current_phase]) : list
+
         return [
           "Skills provide specialized instructions and workflows for specific tasks.",
           "Use the skill tool to load a skill when a task matches its description.",
           // the agents seem to ingest the information about skills a bit better if we present a more verbose
           // version of them here and a less verbose version in tool description, rather than vice versa.
-          Skill.fmt(list, { verbose: true }),
+          Skill.fmt(scoped, { verbose: true }),
         ].join("\n")
       }),
 
@@ -118,7 +126,7 @@ const locationServiceMapNode = LayerNode.make({
 export const node = LayerNode.make({
   service: Service,
   layer: layer,
-  deps: [Skill.node, MCP.node, locationServiceMapNode],
+  deps: [Skill.node, MCP.node, locationServiceMapNode, EngagementStore.node],
 })
 
 export * as SystemPrompt from "./system"

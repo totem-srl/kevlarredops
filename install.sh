@@ -147,21 +147,10 @@ main() {
 
   ok "Installed ${BIN_NAME} v${VERSION} to ${INSTALL_DIR}/${BIN_NAME}"
 
-  # Skills — bundled attack knowledge. Installed to the global home
-  # (~/.pentestcode/skills), which PentestCode discovers from any directory.
-  # Best-effort: refreshed on each install, never aborts the install if absent.
-  skills_dir="$HOME/.pentestcode/skills"
-  skills_url="https://github.com/${REPO}/releases/download/v${VERSION}/skills.tar.gz"
-  if curl -fsSL "$skills_url" -o "${tmp_dir}/skills.tar.gz" 2>/dev/null; then
-    mkdir -p "$skills_dir"
-    if tar -xzf "${tmp_dir}/skills.tar.gz" -C "$skills_dir" 2>/dev/null; then
-      ok "Skills installed to ${skills_dir}"
-    else
-      info "Could not extract skills archive; skipping"
-    fi
-  else
-    info "No skills archive for this release; skipping"
-  fi
+  # Skills (bundled attack knowledge) are embedded in the binary and seeded to
+  # ~/.pentestcode/skills/bundled on first run — no separate download needed,
+  # and user-authored skills under ~/.pentestcode/skills/{user,packs} are never
+  # touched by upgrades.
 
   # check PATH
   if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
