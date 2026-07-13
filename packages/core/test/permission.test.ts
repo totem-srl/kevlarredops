@@ -168,7 +168,7 @@ describe("PermissionV2", () => {
     }),
   )
 
-  it.effect("uses build permissions when the Session agent is omitted", () =>
+  it.effect("uses default-agent permissions when the Session agent is omitted", () =>
     Effect.gen(function* () {
       yield* setup()
       const { db } = yield* Database.Service
@@ -180,7 +180,7 @@ describe("PermissionV2", () => {
         .pipe(Effect.orDie)
       const agents = yield* AgentV2.Service
       yield* agents.transform((editor) =>
-        editor.update(AgentV2.ID.make("build"), (agent) => {
+        editor.update(AgentV2.ID.make("pentest"), (agent) => {
           agent.permissions = [{ action: "todowrite", resource: "*", effect: "allow" }]
         }),
       )

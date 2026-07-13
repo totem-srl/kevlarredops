@@ -395,10 +395,10 @@ bun turbo typecheck
 - [ ] Clean up `packages/opencode/src/session/reminders.ts` — may still reference coding concepts
 
 ### Build & Release
-- [ ] Cross-compile all 12 binaries (`bun run build --skip-embed-web-ui`) — linux/darwin/win32 × x64/arm64 + baseline + musl
+- [ ] Cross-compile binaries (`bun run build --skip-embed-web-ui`) — linux/darwin × x64/arm64 + baseline + musl (no Windows targets)
 - [ ] Smoke test binary on current platform (`bun run build --single --skip-embed-web-ui`)
 - [ ] Set up GitHub Release workflow (`OPENCODE_RELEASE=1 GH_REPO=s0ld13rr/pentestcode bun run build`)
-- [ ] Verify install.sh / install.ps1 work against published release
+- [ ] Verify install.sh works against published release
 
 ### Testing
 - [ ] End-to-end test on CTF target with new build
