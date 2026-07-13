@@ -86,16 +86,14 @@ export function SubagentBar() {
         })
       }
     }
-    // Running first, then most-recently-added (map preserves insertion order).
-    const all = Array.from(byChild.values())
-    const running = all.filter((e) => e.status === "running")
-    const rest = all.filter((e) => e.status !== "running").reverse()
-    return [...running, ...rest]
+    // Only live subagents. Finished ones are removed as soon as they complete —
+    // the bar tracks in-flight work, not history. Completed subagents stay
+    // reachable through the session list for reviewing their results.
+    return Array.from(byChild.values()).filter((e) => e.status === "running")
   })
 
   const shown = createMemo(() => subagents().slice(0, MAX_ROWS))
   const overflow = createMemo(() => subagents().length - shown().length)
-  const runningCount = createMemo(() => subagents().filter((e) => e.status === "running").length)
 
   const icon = (status: Status) => (status === "done" ? "✓" : status === "error" ? "✗" : "·")
   const iconColor = (status: Status) =>
@@ -117,8 +115,7 @@ export function SubagentBar() {
           flexDirection="column"
         >
           <text fg={theme.textMuted}>
-            Subagents ({subagents().length}
-            {runningCount() > 0 ? `, ${runningCount()} running` : ""}) — click to view
+            Subagents ({subagents().length} running) — click to view
           </text>
           <For each={shown()}>
             {(entry) => (

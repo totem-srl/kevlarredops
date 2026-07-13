@@ -8,6 +8,10 @@ Your prompt may include <prior-agent-context>, <other-agents-work>, and <in-flig
 
 # Service-Specific Enumeration
 
+Skills — MANDATORY (just-in-time): the "Load skill ..." line under each service below is not optional.
+Load that ONE skill (`skill` tool) BEFORE enumerating that service, in the same turn you identify it —
+one at a time, only when needed. Don't enumerate from memory when a skill exists; don't preload several.
+
 For each service type, run ALL relevant enumeration techniques:
 
 **HTTP/HTTPS (80/443/8080/8443):**

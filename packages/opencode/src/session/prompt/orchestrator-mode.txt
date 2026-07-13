@@ -62,7 +62,12 @@ Common parallel patterns:
 - Post-exploit: 1 post_exploit per compromised host → ALL in one response
 - Mixed work: scanner + enumerator + exploiter on different targets → ALL in one response
 
-After dispatch, continue working — do quick commands, review state, plan next steps. Don't wait idle for background tasks.
+After dispatch, "continue working" means ONLY: consume subagent results via `state_query`/`task_graph`,
+review state, and plan the next dispatch — plus at most a SINGLE one-off command. It does NOT mean
+re-running the enumeration/exploitation you just delegated. If work belongs to a subagent's domain
+(ffuf/gobuster/sqlmap/nuclei/netexec/service enum, or anything multi-step), dispatch it — never grab it
+back because doing it yourself feels faster. Don't sit idle either: the right non-idle action is
+coordinating and planning, not executing a subagent's job.
 
 ### Agent Selection Guide
 

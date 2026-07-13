@@ -110,6 +110,23 @@ function errorText(error: unknown) {
   return String(error)
 }
 
+// Finished jobs (completed/error/cancelled) are kept only as a short tail so
+// consumers can still report "recently finished" work — without this the map
+// grows unbounded for the life of the process and every finished subagent
+// lingers forever in <live-subagents> and `state_query subagents`. Running jobs
+// are never pruned. Waiters resolve via the `done` Deferred (settle time), not a
+// map lookup, so evicting old finished entries can't strand a pending wait().
+const MAX_FINISHED = 30
+
+function pruneFinished(jobs: Map<string, Active>): void {
+  const finished = Array.from(jobs.values()).filter((job) => job.info.status !== "running")
+  if (finished.length <= MAX_FINISHED) return
+  finished
+    .sort((a, b) => (a.info.completed_at ?? a.info.started_at) - (b.info.completed_at ?? b.info.started_at))
+    .slice(0, finished.length - MAX_FINISHED)
+    .forEach((job) => jobs.delete(job.info.id))
+}
+
 /**
  * Makes one scoped, process-local registry. Entries are intentionally not
  * durable: process restart or owner-scope closure loses status and interrupts
@@ -161,7 +178,9 @@ export const make = Effect.gen(function* () {
           ...(Exit.isFailure(exit) ? { error: errorText(Cause.squash(exit.cause)) } : {}),
         },
       }
-      return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
+      const updated = new Map(jobs).set(id, next)
+      pruneFinished(updated)
+      return [{ info: snapshot(next), done: job.done, scope: job.scope }, updated]
     })
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
     if (result.scope) {
@@ -350,7 +369,9 @@ export const make = Effect.gen(function* () {
           completed_at,
         },
       }
-      return [{ info: snapshot(next), done: job.done, scope: job.scope }, new Map(jobs).set(id, next)]
+      const updated = new Map(jobs).set(id, next)
+      pruneFinished(updated)
+      return [{ info: snapshot(next), done: job.done, scope: job.scope }, updated]
     })
     if (result.info && result.done) yield* Deferred.succeed(result.done, result.info).pipe(Effect.ignore)
     if (result.scope) yield* Scope.close(result.scope, Exit.void)

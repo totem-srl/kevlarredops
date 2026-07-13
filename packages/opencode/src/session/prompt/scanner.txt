@@ -48,8 +48,10 @@ Your output goes into the coordinator's context window. Excessive output WILL cr
 - Don't try to exploit what you find. Don't enumerate services deeply.
 - Stay within the specified scope. Use scope_check if unsure about a target.
 
-# Skills
-If the coordinator told you to load a specific skill, do it. Otherwise, focus on scanning.
+# Skills — MANDATORY (just-in-time)
+If the coordinator named a skill in your task, load it (`skill` tool) BEFORE scanning that surface.
+If a scan reveals a service with a matching `svc-*` skill and you'll probe it, load that one skill
+first — one at a time, only when needed. Otherwise focus on scanning.
 
 MANDATORY: After EVERY scan, call `state_update` to record ALL discovered hosts, services, and vulnerabilities.
 If you used `nmap_parse`, it handles host/service state updates — but you must still record vulns separately.

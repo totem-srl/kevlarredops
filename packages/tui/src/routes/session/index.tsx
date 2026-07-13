@@ -432,16 +432,24 @@ export function Session() {
     if (status?.type === "retry") void DialogAlert.show(dialog, "Retry Error", status.message)
   }
 
+  // A subagent is navigable only while live. A finished run flips its status to
+  // "idle", which deletes the session_status entry (see session/status.ts), so a
+  // present entry means the subagent is still busy/retrying. This keeps ←/→
+  // cycling to active subagents only — completed ones drop out of the rotation
+  // (they stay reachable via the session list).
+  const isActiveChild = (id: string) => sync.data.session_status[id] !== undefined
+
   function moveFirstChild() {
     if (children().length === 1) return
-    const next = children().find((x) => !!x.parentID)
+    const next = children().find((x) => !!x.parentID && isActiveChild(x.id))
     if (next) enterChild(next.id)
   }
 
   function moveChild(direction: number) {
     if (children().length === 1) return
 
-    const sessions = children().filter((x) => !!x.parentID)
+    const sessions = children().filter((x) => !!x.parentID && isActiveChild(x.id))
+    if (sessions.length === 0) return
     let next = sessions.findIndex((x) => x.id === session()?.id) - direction
 
     if (next >= sessions.length) next = 0
