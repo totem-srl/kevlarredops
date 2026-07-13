@@ -78,7 +78,7 @@ describe("LocationServiceMap", () => {
           })
           yield* Effect.promise(() =>
             fs.writeFile(
-              path.join(blocked.path, "opencode.json"),
+              path.join(blocked.path, "pentestcode.json"),
               JSON.stringify({
                 experimental: { policies: [{ effect: "deny", action: "provider.use", resource: "test" }] },
               }),
@@ -105,15 +105,12 @@ describe("LocationServiceMap", () => {
           expect(blockedState.providers.some((provider) => provider.id === ProviderV2.ID.make("test"))).toBe(false)
           expect(blockedState.tools.map((tool) => tool.name).sort()).toEqual([
             "application_context",
-            "apply_patch",
             "bash",
-            "edit",
             "glob",
             "grep",
             "question",
             "read",
             "skill",
-            "todowrite",
             "webfetch",
             "websearch",
             "write",
@@ -122,15 +119,12 @@ describe("LocationServiceMap", () => {
           expect(allowedState.providers.some((provider) => provider.id === ProviderV2.ID.make("test"))).toBe(true)
           expect(allowedState.tools.map((tool) => tool.name).sort()).toEqual([
             "application_context",
-            "apply_patch",
             "bash",
-            "edit",
             "glob",
             "grep",
             "question",
             "read",
             "skill",
-            "todowrite",
             "webfetch",
             "websearch",
             "write",
@@ -150,7 +144,7 @@ describe("LocationServiceMap", () => {
           const location = Location.Ref.make({ directory: AbsolutePath.make(dir.path) })
           yield* Effect.promise(() =>
             fs.writeFile(
-              path.join(dir.path, "opencode.json"),
+              path.join(dir.path, "pentestcode.json"),
               JSON.stringify({
                 providers: {
                   unavailable: {
