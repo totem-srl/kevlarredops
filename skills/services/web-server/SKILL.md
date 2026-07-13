@@ -83,13 +83,29 @@ index.php.old
 index.php.orig
 index.php~
 EOF
-ffuf -w paths.txt -u http://<t>/FUZZ -mc 200,301,302,401,403 -o ffuf.json -of json
-# then: gobuster_parse on the results
+ffuf -w paths.txt -u http://<t>/FUZZ -mc 200,301,302,401,403 -maxtime 100 -o ffuf.json -of json
+# then (separate command): gobuster_parse on the results
 ```
 
 A `for ext in bak old ...; do curl ...; done` loop is the WRONG pattern — use the ffuf
 run above. If ffuf/gobuster is missing, install it (`apt install -y ffuf gobuster`)
 rather than looping curl.
+
+## Authenticated testing
+Needing a session cookie/header is NOT a reason to hand-run curl — every tool carries auth:
+- ffuf `-H "Cookie: ..."` / `-b`, gobuster `--cookies`, nuclei `-H`, sqlmap `--cookie=`, feroxbuster `-H`.
+- A single `curl -b` is only for a one-off PoC, never "curl for all requests".
+
+## Injection (SQLi) → sqlmap, not by hand
+- Detect with sqlmap (blind/time/union coverage, true/false differential), then `sqlmap_parse`.
+- Non-standard transport (Next.js Server Actions / RSC, custom `Next-Action` / `text/x-component`):
+  ONE recon `curl` to confirm the param reacts is allowed, then move detection to a saved request:
+  `sqlmap -r request.txt -p <param> --batch` → `sqlmap_parse`. No manual `' OR 1=1` sweeps.
+
+## Long-running fuzz
+- Add `-maxtime N` (below the shell timeout) so `ffuf -o json` flushes on a clean exit before it's killed.
+- Run long fuzzes backgrounded / with a raised timeout; run the fuzz and `gobuster_parse` as SEPARATE commands.
+- Drop `-s` (see progress). If throttled, LOWER `-t` and add `-p 0.1`.
 
 ## Output Rules
 - Never curl-loop over paths — that's what ffuf/gobuster are for. Single `curl` only for one-off requests.

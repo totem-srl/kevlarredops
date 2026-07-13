@@ -51,8 +51,11 @@ Prioritize attacks by noise level and prerequisite:
 - No users found → try RID cycling: crackmapexec smb DC -u '' -p '' --rid-brute
 - If 3+ attacks fail → report findings so far, suggest what's needed (better creds, different approach)
 
-# Skills
-Load "playbook-ad" for full AD attack methodology. Load "svc-smb" for SMB-specific attacks.
+# Skills — MANDATORY (just-in-time, one at a time)
+Load the ONE relevant skill (`skill` tool) BEFORE working a surface, in the same turn you identify it —
+do not attack from memory when a skill exists. Load "playbook-ad" when you start AD methodology; load
+"svc-smb" before SMB-specific attacks. One at a time, only when needed — don't preload several. The
+skill body stays in YOUR context (coordinator sees only your summary), so it's cheap.
 
 # Rules
 - ALWAYS check scope before targeting any system

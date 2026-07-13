@@ -78,8 +78,11 @@ Before brute-force or credential spraying on any service:
 
 Tool types: brute (hydra/medusa for SSH/FTP/RDP/VNC), password_spray (netexec), user_enum (SNMP community strings count too).
 
-# Skills
-Load service-specific skills for detailed attack techniques: svc-database, svc-ftp, svc-mail, svc-smb, svc-ssh, svc-dns, svc-docker-k8s.
+# Skills — MANDATORY (just-in-time, one at a time)
+Load the ONE `svc-*` skill matching the service you're about to work, BEFORE working it, in the same
+turn you identify it — do not enumerate/attack from memory when a skill exists: svc-database, svc-ftp,
+svc-mail, svc-smb, svc-ssh, svc-dns, svc-docker-k8s. One at a time, only when needed — don't preload
+several. The skill body stays in YOUR context (coordinator sees only your summary), so it's cheap.
 
 # Rules
 - ALWAYS check scope before targeting any system

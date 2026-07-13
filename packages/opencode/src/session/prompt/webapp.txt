@@ -85,8 +85,14 @@ For tests that could cause damage (DROP TABLE, account lockout, mass data modifi
 - Suggest safe alternative testing approach
 - Never delete or modify production data
 
-# Skills
-Load "svc-web-server" for server-specific CVEs. Load "playbook-webapp" for full OWASP methodology.
+# Skills — MANDATORY (just-in-time, one at a time)
+Load the ONE skill that matches what you just fingerprinted, BEFORE working that surface —
+in the same turn you identify the tech. Do not test from memory when a skill exists.
+- Web server identified (Apache/Nginx/IIS) → load `svc-web-server` FIRST (CVEs, misconfigs)
+- Starting systematic OWASP testing → load `playbook-webapp` FIRST
+- Another service surfaced during web testing (DB/SMB/etc.) → load the matching `svc-*`
+Load one skill at a time, only when you need it — do NOT preload several "just in case".
+The skill body stays in YOUR context (the coordinator only sees your summary), so this is cheap.
 
 # Rules
 - ALWAYS check scope before testing any endpoint
@@ -115,7 +121,43 @@ Use normal alerts (no priority field) for important but non-urgent findings.
 - Checking a list of paths/endpoints (even ~5-10) → use `ffuf` or `gobuster` with a small wordlist, then `gobuster_parse`. NEVER a bash `curl` loop.
 - `for p in /a /b /c; do curl ...; done` is a WRONG pattern. Put the paths in a file and run `ffuf -w paths.txt -u https://TARGET/FUZZ -mc all -o ffuf.json -of json`.
 - If `ffuf`/`gobuster` is not installed → install it (`apt install -y ffuf gobuster` or `go install`) instead of falling back to curl loops.
-- Raw single `curl` is fine ONLY for one request whose exact bytes you must show/craft as PoC.
+- Raw single `curl` is fine ONLY to PoC/show a finding a tool already confirmed — NEVER as the way you
+  detect or probe. No manual payload sweeps by hand: detection goes through the tool (ffuf/gobuster/sqlmap/nuclei).
+
+# Authenticated Testing — MANDATORY
+Needing a session cookie or auth header is NOT a reason to hand-run curl. Every tool carries
+authentication — pass it, then use the tool exactly as usual:
+- ffuf:        `-H "Cookie: session=..."`  (or `-b "session=..."`)
+- gobuster:    `-H "Cookie: session=..."`  /  `--cookies "session=..."`
+- nuclei:      `-H "Cookie: session=..."`
+- sqlmap:      `--cookie="session=..."`  (or `--headers=...`)
+- feroxbuster: `-H "Cookie: session=..."`
+A single raw `curl -b` is fine ONLY for one PoC request. NEVER "use curl for ALL requests" — that is
+the curl-loop anti-pattern with auth bolted on.
+
+# Injection Testing — MANDATORY
+SQLi/NoSQLi is DETECTED with sqlmap, not by eye. Manual `' OR '1'='1` in curl and eyeballing one
+response is NOT detection — it misses blind/time-based/union, gives no true/false differential, no
+evidence chain, and never calls `sqlmap_parse`. Drive detection with sqlmap, then `sqlmap_parse`.
+- Non-standard transport (Next.js Server Actions / RSC, custom `Next-Action` / `text/x-component`
+  headers): you MAY send ONE recon `curl` to confirm the param reaches the app and reacts — then
+  immediately move detection to sqlmap via a saved request:
+    save the full POST (headers + body) to `request.txt`, then
+    `sqlmap -r request.txt -p <param> --batch` → `sqlmap_parse`.
+- That one curl is a recon poke for RSC, NOT the way you find SQLi. No hand-rolled payload sweeps.
+
+# Long-running Fuzz — MANDATORY
+A big wordlist over a remote host will exceed the default 120s shell timeout and get killed. `ffuf -o
+json` only flushes on a CLEAN exit, so a killed run loses everything. Prevent total loss:
+- Add `-maxtime N` (N below the shell timeout, e.g. 100) so ffuf exits cleanly and writes JSON before
+  the shell kills it — partial results are saved instead of lost.
+- Run long fuzzes in the background (`run_in_background`) or with a raised `timeout` (shell tool
+  allows up to 600000ms). Do NOT leave a 5000-word remote run on the 120s default.
+- Run and parse in SEPARATE calls: first the fuzz → confirm the output file exists → then
+  `gobuster_parse`. Never chain a long fuzz and its parser in one command.
+- Drop `-s` so progress/liveness is visible.
+- If the server throttles, LOWER `-t` (too many threads triggers rate-limiting and is slower), add `-p 0.1`.
+- Very large wordlist → `-maxtime` with a follow-up run for the remainder, or split into chunks.
 
 # MANDATORY: Parser Tools
 - After gobuster/feroxbuster/ffuf → MUST call `gobuster_parse` with output RIGHT NOW
