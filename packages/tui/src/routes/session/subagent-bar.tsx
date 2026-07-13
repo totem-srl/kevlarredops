@@ -67,14 +67,17 @@ export function SubagentBar() {
         if (state.status === "pending") continue
         const childID = stringValue(state.metadata?.sessionId)
         if (!childID) continue
-        const background = state.metadata?.background === true
+        // Child-session liveness is the source of truth for "running", not the task
+        // part's status: a background subagent's part flips to "completed" the moment
+        // it's dispatched while the child keeps working, so keying off the part alone
+        // would drop it immediately. A present session_status entry means busy (idle
+        // deletes it — see session/status.ts), matching the nav's isActiveChild.
         const childStatus = sync.data.session_status[childID]
+        const childActive = childStatus !== undefined && childStatus.type !== "idle"
 
         let status: Status
-        if (state.status === "error") status = "error"
-        else if (state.status === "completed") status = "done"
-        else if (state.status === "running" || (background && childStatus !== undefined && childStatus.type !== "idle"))
-          status = "running"
+        if (state.status === "running" || childActive) status = "running"
+        else if (state.status === "error") status = "error"
         else status = "done"
 
         byChild.set(childID, {
