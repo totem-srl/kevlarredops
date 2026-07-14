@@ -30,16 +30,22 @@ const BACKGROUND_DESCRIPTION = [
   "Use background only for independent work that can run while you continue elsewhere.",
   "You will be notified automatically when it finishes.",
 ].join(" ")
-const BACKGROUND_STARTED = [
-  "The task is working in the background. You will be notified automatically when it finishes.",
-  "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
-  "Work on non-overlapping tasks, or briefly tell the user what you launched and end your response.",
-].join("\n")
-const BACKGROUND_UPDATED = [
-  "Additional context sent to the running background task.",
-  "The task is still working in the background. You will be notified automatically when it finishes.",
-  "DO NOT sleep, poll for progress, ask the task for status, or duplicate this task's work — avoid working with the same files or topics it is using.",
-  "Work on non-overlapping tasks, or briefly tell the user what you sent and end your response.",
+// Kept to one line each: this string is the tool RESULT of every background
+// spawn and is replayed in the transcript on every subsequent turn (25× in a
+// real session). The full "don't poll / don't duplicate" guidance already lives
+// in the tool description (sent once, cached), so repeating it per-result is
+// pure transcript bloat. See redesign QW3.
+const BACKGROUND_STARTED = "Task launched in background — you'll be notified on completion. Continue with non-overlapping work."
+const BACKGROUND_UPDATED = "Context sent to the running background task — you'll be notified on completion."
+
+// Injected into every fresh subagent prompt so the coordinator doesn't have to
+// re-paste findings/creds/context (which bloats its output and re-plays every
+// turn). The subagent shares the engagement state and pulls context itself.
+// See redesign QW3.
+const CONTEXT_PROTOCOL = [
+  "<context-protocol>",
+  "Your engagement state (hosts, confirmed vulns, credentials, already-tested vectors) is shared and visible to you. Before acting, query it with state_query. Do NOT re-test or re-report anything already confirmed in state, and do NOT expect findings/creds/tokens to be pasted into this prompt — pull them yourself. Record every new finding immediately via state_update / the parser tools.",
+  "</context-protocol>",
 ].join("\n")
 
 const BaseParameterFields = {
@@ -314,7 +320,7 @@ export const TaskTool = Tool.define(
             j.metadata?.sessionId !== nextSession.id,
         )
 
-        const blocks: string[] = []
+        const blocks: string[] = [CONTEXT_PROTOCOL]
         if (priorContexts.length > 0) blocks.push(formatPriorContext(priorContexts))
         if (otherAgents.length > 0) blocks.push(formatOtherAgentsWork(otherAgents))
         if (inFlight.length > 0) blocks.push(formatInFlightSiblings(inFlight))

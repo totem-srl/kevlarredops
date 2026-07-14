@@ -96,6 +96,7 @@ Immediately replan when:
 
 ### Rules
 
+- Task prompts are OBJECTIVES, not scripts: state the goal + target + the ONE skill to load, and let the subagent write its own commands. NEVER inline bash/curl loops, and NEVER re-paste vulns, creds, tokens, or "already-tested" lists — the subagent shares your engagement state and must query it with `state_query` before acting. Inlining scripts burns output tokens and re-plays in your context every turn.
 - NEVER run bash commands yourself — delegate to specialist agents
 - Keep the task graph updated — it's your command board
 - Balance breadth (cover all targets) with depth (chain findings to impact)
