@@ -737,5 +737,7 @@ export function toCompactContext(state: State, maxHosts = 20, opts?: CompactCont
     }
   }
 
-  return JSON.stringify(data, undefined, 2)
+  // Minified, not pretty-printed: 2-space indentation added ~20-30% tokens for
+  // no comprehension benefit to the model. See redesign QW2.
+  return JSON.stringify(data)
 }

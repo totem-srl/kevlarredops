@@ -1327,6 +1327,10 @@ const layer = Layer.effect(
                 try {
                   const state = yield* engagement.get()
                   if (!state) return undefined
+                  // Orchestration bookkeeping (task graph, live subagents, user
+                  // command hints) is a coordinator concern — injecting it into
+                  // every focused subagent's turn is pure noise. See redesign QW2.
+                  const isCoordinator = agent.mode !== "subagent"
                   const modeDirective = modeDirectives[state.mode] ?? ""
                   const transitionHint = phaseTransitionHint(state)
                   const lines = [
@@ -1383,12 +1387,14 @@ const layer = Layer.effect(
                   }
                   // Real subagent liveness from the background-job registry —
                   // the source of truth, unlike task-graph's self-reported status.
-                  const liveJobs = (yield* background.list()).filter(
-                    (j) => j.type === "task" && j.metadata?.parentSessionId === sessionID,
-                  )
+                  const liveJobs = isCoordinator
+                    ? (yield* background.list()).filter(
+                        (j) => j.type === "task" && j.metadata?.parentSessionId === sessionID,
+                      )
+                    : []
                   const liveRunning = liveJobs.filter((j) => j.status === "running")
 
-                  const taskGraph = yield* engagement.getTaskGraph()
+                  const taskGraph = isCoordinator ? yield* engagement.getTaskGraph() : {}
                   const taskEntries = Object.values(taskGraph)
                   if (taskEntries.length > 0) {
                     const counts = TaskGraph.statusSummary(taskGraph)
@@ -1468,17 +1474,19 @@ const layer = Layer.effect(
                   lines.push("")
                   lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.")
 
+                  // Slash-command tips are user-facing — only the coordinator
+                  // talks to the user, so subagents don't need them (QW2).
                   const cmdHints: string[] = []
                   const hostCount = Object.keys(state.hosts).length
                   const vulnCount = Object.values(state.hosts).reduce((sum, h) => sum + h.vulns.length, 0)
                   const credCount = Object.keys(state.credentials).length
-                  if (step <= 2 && hostCount === 0) {
+                  if (isCoordinator && step <= 2 && hostCount === 0) {
                     cmdHints.push("Tip for user: /scope to set targets, /mode to choose execution style")
                   }
-                  if (vulnCount > 0 && vulnCount <= 3) {
+                  if (isCoordinator && vulnCount > 0 && vulnCount <= 3) {
                     cmdHints.push("Tip for user: /vulns shows all findings, /report generates a report")
                   }
-                  if (credCount > 0 && credCount <= 2) {
+                  if (isCoordinator && credCount > 0 && credCount <= 2) {
                     cmdHints.push("Tip for user: /creds shows all captured credentials")
                   }
                   if (cmdHints.length > 0) {
@@ -1517,8 +1525,10 @@ const layer = Layer.effect(
                 }
               }),
             ])
+            // Static prefix only — the volatile engagement state is passed
+            // separately as `volatileSystem` so this block stays cacheable
+            // across turns (see redesign QW1). Ordered most-stable first.
             const system = [
-              ...(engagementCtx ? [engagementCtx] : []),
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
@@ -1533,6 +1543,7 @@ const layer = Layer.effect(
               sessionID,
               parentSessionID: session.parentID,
               system,
+              volatileSystem: engagementCtx,
               messages: [
                 ...modelMsgs,
                 ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),

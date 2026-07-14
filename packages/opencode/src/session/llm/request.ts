@@ -25,6 +25,7 @@ type PrepareInput = {
   readonly agent: Agent.Info
   readonly permission?: PermissionV1.Ruleset
   readonly system: string[]
+  readonly volatileSystem?: string
   readonly messages: ModelMessage[]
   readonly small?: boolean
   readonly tools: Record<string, Tool>
@@ -76,6 +77,13 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     system.length = 0
     system.push(header, rest.join("\n"))
   }
+
+  // Lower volatile per-turn context (engagement state) as its own trailing
+  // system block AFTER the static prefix. Prompt caching matches the longest
+  // identical prefix up to a breakpoint; keeping the mutable state out of the
+  // large static block (base prompt + skills + refs) lets that block stay a
+  // cache read every turn instead of a full rewrite. See redesign QW1.
+  if (input.volatileSystem) system.push(input.volatileSystem)
 
   const variant =
     !input.small && input.model.variants && input.user.model.variant
