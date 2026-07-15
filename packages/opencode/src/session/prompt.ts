@@ -1497,6 +1497,14 @@ const layer = Layer.effect(
                     lines.push("</command-hints>")
                   }
 
+                  // Resolved-vectors ledger (R6 fix) — injected for BOTH coordinator
+                  // and subagents so no agent re-opens a dead vector cross-session.
+                  const resolvedVectorsCtx = EngagementSchema.toResolvedVectorsContext(state)
+                  if (resolvedVectorsCtx) {
+                    lines.push("")
+                    lines.push(resolvedVectorsCtx)
+                  }
+
                   // Wordlist usage context
                   const wordlistUsages = yield* engagement.getWordlistUsages()
                   if (wordlistUsages.length > 0) {

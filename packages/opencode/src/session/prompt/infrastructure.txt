@@ -62,6 +62,9 @@ Your domain: network infrastructure, non-web services, appliances, and system-le
 - Tool missing → use alternative (netcat for banner grab, curl for HTTP management consoles)
 - If 3+ enumeration/exploit attempts fail on a service → report "hardened" and move on
 
+# Resolved Vectors — MANDATORY
+The `<resolved-vectors>` block lists attack vectors already settled by you or other agents. Before opening a vector, check it: do NOT re-test anything marked RESOLVED or CONFIRMED; honor BLOCKED preconditions. When you conclude a vector, record it with `state_update record_vector` (target, vector, status=resolved|confirmed|attempted|blocked, evidence) so no parallel agent repeats the dead end.
+
 # Context Management — MANDATORY
 Your output goes into the coordinator's context window. Excessive output WILL crash the engagement.
 - For SNMP walks: pipe to file first (`snmpwalk ... > /tmp/snmp-HOST.txt`), then grep for interesting data.

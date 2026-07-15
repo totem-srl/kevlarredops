@@ -306,6 +306,35 @@ export const NetworkSegment = Schema.Struct({
 }).annotate({ identifier: "Engagement.NetworkSegment" })
 export type NetworkSegment = typeof NetworkSegment.Type
 
+// --- Resolved Vectors Ledger (R6 fix: don't re-test dead vectors) ---
+// A first-class, cross-agent record of attack vectors that have been probed to a
+// conclusion. Both the coordinator and every subagent query this before opening a
+// vector and record into it when a vector is settled — so the open-redirect-7x
+// loop and cross-agent duplication cannot recur.
+
+export const VectorStatus = Schema.Literals([
+  "attempted", // probed, inconclusive — safe to retry only with a new technique
+  "confirmed", // vulnerable — a Vulnerability record carries the detail; do not re-confirm
+  "resolved", // definitively NOT exploitable / dead end — DO NOT RETEST
+  "blocked", // needs a precondition not yet met — revisit only when it changes
+])
+export type VectorStatus = typeof VectorStatus.Type
+
+export const ResolvedVector = Schema.Struct({
+  id: Schema.String,
+  timestamp: Schema.String,
+  target: Schema.String, // host:port / URL / endpoint the vector was tried against
+  vector: Schema.String, // technique, e.g. "open-redirect on /redirect", "JWT alg-confusion"
+  status: VectorStatus,
+  tested_by: Schema.optional(Schema.String), // agent type that concluded it
+  attempts: Schema.optional(Schema.Number), // how many times it has been probed
+  evidence: Schema.optional(Schema.String), // short reason it is settled (why dead / why blocked)
+  revisit_when: Schema.optional(Schema.String), // for "blocked": the precondition to wait on
+}).annotate({ identifier: "Engagement.ResolvedVector" })
+export type ResolvedVector = typeof ResolvedVector.Type
+
+export const RESOLVED_VECTORS_MAX = 300
+
 export const State = Schema.Struct({
   id: ID,
   name: Schema.String,
@@ -324,6 +353,7 @@ export const State = Schema.Struct({
   alerts: Schema.optional(Schema.Array(Alert)),
   live_sessions: Schema.optional(Schema.Array(LiveSession)),
   network_segments: Schema.optional(Schema.Array(NetworkSegment)),
+  resolved_vectors: Schema.optional(Schema.Array(ResolvedVector)),
   pause_on_finding: Schema.optional(PauseBehavior),
   current_phase: PentestPhase,
   mode: PentestMode,
@@ -588,6 +618,27 @@ export function decisionSummary(decisions: Decision[]): {
     pending,
     failedVectors: failed.slice(-5).map((d) => d.decision),
   }
+}
+
+// Compact block for both coordinator and subagents. Shows vectors already settled
+// so no agent re-opens a dead end. `resolved`/`confirmed` are hard "don't retest";
+// `blocked` lists the precondition; `attempted` is advisory (retry only with a new
+// technique). Kept small — this rides in every turn's context for every role.
+export function toResolvedVectorsContext(state: State, max = 40): string | undefined {
+  const vectors = state.resolved_vectors ?? []
+  if (vectors.length === 0) return undefined
+  const rank: Record<string, number> = { resolved: 0, blocked: 1, confirmed: 2, attempted: 3 }
+  const sorted = [...vectors].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
+  const shown = sorted.slice(0, max)
+  const lines = ["<resolved-vectors>", "Vectors already settled — DO NOT re-test resolved/confirmed; honor blocked preconditions:"]
+  for (const v of shown) {
+    const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
+    const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
+    lines.push(`  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${why}`)
+  }
+  if (sorted.length > shown.length) lines.push(`  … +${sorted.length - shown.length} more (state_query resolved_vectors)`)
+  lines.push("</resolved-vectors>")
+  return lines.join("\n")
 }
 
 export interface CompactContextOpts {

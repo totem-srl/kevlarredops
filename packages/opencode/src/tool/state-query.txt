@@ -22,5 +22,6 @@ Supported query types:
 - sessions: Show live sessions — shells, tunnels, listeners, proxies currently alive
 - segments: Show discovered network segments, VLANs, pivot paths
 - wordlists: Show wordlists already used (filter: "host_ip" or "host_ip:port" or "host_ip:port:tool_type"). Prevents repeating wordlists on the same target:port:tool_type combination.
+- resolved_vectors: Show attack vectors already settled (filter by status "attempted"|"confirmed"|"resolved"|"blocked", or a target/vector substring). Check BEFORE opening a vector — do not re-test RESOLVED/CONFIRMED, honor BLOCKED preconditions.
 - ooda: Full situation-awareness context — changes, coverage gaps, alerts, sessions, segments, tasks, objectives
 - subagents: REAL running/finished subagent processes for this session, from the live job registry. Use this (NOT task_graph status) to check what is actually running — task_graph "dispatched" does not mean a subagent was launched.

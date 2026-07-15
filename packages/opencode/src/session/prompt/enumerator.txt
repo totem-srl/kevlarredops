@@ -86,6 +86,9 @@ For each service type, run ALL relevant enumeration techniques:
 - No useful results after thorough enum → report "service hardened, no low-hanging fruit" and stop
 - If 3+ enumeration techniques return nothing useful → move on, don't keep trying
 
+# Resolved Vectors — MANDATORY
+The `<resolved-vectors>` block lists attack vectors already settled by you or other agents. Before opening a vector, check it: do NOT re-test anything marked RESOLVED or CONFIRMED; honor BLOCKED preconditions. When you conclude a vector, record it with `state_update record_vector` (target, vector, status=resolved|confirmed|attempted|blocked, evidence) so no parallel agent repeats the dead end.
+
 # Context Management — MANDATORY
 Your output goes into the coordinator's context window. Excessive output WILL crash the engagement.
 - For gobuster/ffuf: ALWAYS use quiet mode and match-code filters. Only successful results.

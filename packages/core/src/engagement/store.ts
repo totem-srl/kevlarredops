@@ -92,6 +92,9 @@ export interface Interface {
   readonly getWordlistUsages: (filter?: { host_ip?: string; port?: number; tool_type?: string }) => Effect.Effect<readonly EngagementSchema.WordlistUsage[]>
   // Pause Behavior
   readonly setPauseBehavior: (behavior: EngagementSchema.PauseBehavior) => Effect.Effect<void>
+  // Resolved Vectors Ledger (R6 fix)
+  readonly addResolvedVector: (vector: EngagementSchema.ResolvedVector) => Effect.Effect<{ created: boolean }>
+  readonly getResolvedVectors: (filter?: { target?: string; status?: string }) => Effect.Effect<readonly EngagementSchema.ResolvedVector[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -880,6 +883,56 @@ const layer = Layer.effect(
         if (!current) return
         yield* Ref.set(stateRef, { ...current, pause_on_finding: behavior })
         yield* logChange("set_pause", "pause", behavior, `Pause on finding: ${behavior}`)
+      }),
+
+      addResolvedVector: Effect.fn("EngagementStore.addResolvedVector")(function* (vector) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return { created: false }
+        const existing = current.resolved_vectors ?? []
+        // Dedup by (target, vector): a repeat probe bumps attempts and promotes status.
+        const idx = existing.findIndex(
+          (v) => v.target === vector.target && v.vector === vector.vector,
+        )
+        let next: EngagementSchema.ResolvedVector[]
+        let created: boolean
+        if (idx >= 0) {
+          const prev = existing[idx]!
+          const merged: EngagementSchema.ResolvedVector = {
+            ...prev,
+            status: vector.status,
+            timestamp: vector.timestamp,
+            attempts: (prev.attempts ?? 1) + 1,
+            tested_by: vector.tested_by ?? prev.tested_by,
+            evidence: vector.evidence ?? prev.evidence,
+            revisit_when: vector.revisit_when ?? prev.revisit_when,
+          }
+          next = [...existing]
+          next[idx] = merged
+          created = false
+        } else {
+          next = [...existing, { ...vector, attempts: vector.attempts ?? 1 }]
+          created = true
+        }
+        const trimmed = next.length > EngagementSchema.RESOLVED_VECTORS_MAX
+          ? next.slice(next.length - EngagementSchema.RESOLVED_VECTORS_MAX)
+          : next
+        yield* Ref.set(stateRef, { ...current, resolved_vectors: trimmed })
+        yield* logChange(
+          "record_vector",
+          "vector",
+          vector.target,
+          `[${vector.status.toUpperCase()}] ${vector.target} :: ${vector.vector}${created ? "" : " (re-probe)"}`,
+        )
+        return { created }
+      }),
+
+      getResolvedVectors: Effect.fn("EngagementStore.getResolvedVectors")(function* (filter) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return []
+        let vectors = current.resolved_vectors ?? []
+        if (filter?.target) vectors = vectors.filter((v) => v.target === filter.target)
+        if (filter?.status) vectors = vectors.filter((v) => v.status === filter.status)
+        return vectors
       }),
     })
   }),
