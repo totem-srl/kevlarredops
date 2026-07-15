@@ -1587,6 +1587,7 @@ const layer = Layer.effect(
                       "- You are notified as each subagent finishes. When a wave completes you'll see the next ready set: call `plan` with NO new tasks to launch it as-is, or `plan` with new/changed objectives to adapt based on what the finished wave found.",
                       "- Every strategic decision stays yours: what to plan, whether to launch the next wave, and whether the engagement is done. A wave finishing is NOT completion — judge that against objectives and coverage, and do not stop early.",
                       "- Vectors already settled appear in <resolved-vectors>; the harness will not re-dispatch a resolved dead end.",
+                      "- To STOP a running subagent (redundant/wrong/racing), call task_graph abandon with its task id — this HARD-STOPS that subagent (kills its background job, frees its tokens); it affects only that subagent, never its siblings. Use it freely to cut redundant work instead of letting it run.",
                       "</orchestrator-dag>",
                     )
                   }

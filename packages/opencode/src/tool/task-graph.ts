@@ -308,10 +308,14 @@ export const TaskGraphTool = Tool.define(
               yield* store.setTaskGraph(graph)
               const updated = yield* store.get()
               if (updated) yield* store.save(updated)
+              // Orchestrator: actually STOP the running subagent, don't just
+              // de-track it — otherwise it keeps burning tokens in the background.
+              let killed = 0
+              if (flags.experimentalOrchestrator) killed = yield* spawn.cancel(_ctx, id)
               return {
                 title: `Abandoned ${id}`,
-                metadata: {},
-                output: `Task ${id} abandoned.`,
+                metadata: { killed },
+                output: `Task ${id} abandoned.${killed > 0 ? ` Stopped ${killed} running subagent(s) — no more tokens spent on it.` : ""}`,
               }
             }
 

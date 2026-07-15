@@ -471,7 +471,30 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
       }),
     ).pipe(Effect.orDie)
 
-  return { pump }
+  // Hard-stop the running subagent(s) for a task node. Each orchestrated job is
+  // tagged with metadata.taskNodeId, so we find its live background job and
+  // cancel BOTH the session prompt (ops.cancel) and the background fiber
+  // (background.cancel) — the same combo TaskTool uses on abort. Independent per
+  // job, so cancelling one never touches sibling subagents. Returns how many
+  // were stopped.
+  const cancel = (ctx: Tool.Context, nodeId: string) =>
+    Effect.gen(function* () {
+      const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
+      const jobs = (yield* background.list()).filter(
+        (j) =>
+          j.type === id &&
+          j.status === "running" &&
+          j.metadata?.parentSessionId === ctx.sessionID &&
+          j.metadata?.taskNodeId === nodeId,
+      )
+      for (const j of jobs) {
+        if (ops) yield* ops.cancel(SessionID.make(j.id)).pipe(Effect.ignore)
+        yield* background.cancel(j.id).pipe(Effect.ignore)
+      }
+      return jobs.length
+    }).pipe(Effect.orDie)
+
+  return { pump, cancel }
 })
 
 export const TaskTool = Tool.define(
