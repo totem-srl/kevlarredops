@@ -15,7 +15,8 @@ Actions:
 - dispatch: Mark a task as dispatched to an agent. data: { id, assignedAgent?, sessionId? }  — e.g. { "id": "t1", "assignedAgent": "scanner" }
 - complete: Mark task completed with optional result. data: { id, result? }  — e.g. { "id": "t1", "result": "3 open ports" }
 - fail: Mark task failed. data: { id, result? }
-- abandon: Mark task abandoned AND hard-stop its running subagent (kills the background job, frees its tokens; affects only that subagent). Use to cut redundant/racing/wrong work. data: { id }
+- abandon: De-track a task (stop planning around it) but LET its subagent finish — a seemingly-redundant agent may still succeed and its result is still reported (use it or ignore it). Use when it merely LOOKS redundant. data: { id }
+- kill: De-track AND hard-stop the running subagent (kills the background job, frees its tokens; affects only that subagent). Use ONLY when sure it's stuck/looping/wrong — killing loses whatever it might still produce. data: { id }
 - list_ready: List tasks ready for dispatch (all deps completed). No data.
 - list_all: List all tasks with status summary. No data.
 - status: Quick status summary (counts per status). No data.

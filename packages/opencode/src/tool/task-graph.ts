@@ -47,6 +47,7 @@ export const Parameters = Schema.Struct({
     "complete",
     "fail",
     "abandon",
+    "kill",
     "list_ready",
     "list_all",
     "status",
@@ -308,14 +309,37 @@ export const TaskGraphTool = Tool.define(
               yield* store.setTaskGraph(graph)
               const updated = yield* store.get()
               if (updated) yield* store.save(updated)
-              // Orchestrator: actually STOP the running subagent, don't just
-              // de-track it — otherwise it keeps burning tokens in the background.
+              // De-track only. If its subagent is still running, LET IT FINISH —
+              // an "abandoned" (thought-redundant) agent can still succeed, and its
+              // result is still reported for the coordinator to use or ignore.
+              // Reclaiming tokens on a stuck agent is `kill`, a separate deliberate act.
+              return {
+                title: `Abandoned ${id}`,
+                metadata: {},
+                output: `Task ${id} abandoned (de-tracked). If its subagent is still running it will FINISH and its result will still be reported — use it if useful, ignore if truly redundant. To hard-stop a stuck/looping/wrong subagent and reclaim tokens now, use action=kill instead.`,
+              }
+            }
+
+            case "kill": {
+              const id = d.id as string
+              if (!id) return { title: "Error", metadata: {}, output: "Error: data.id is required for kill." }
+              const graph = yield* store.getTaskGraph()
+              if (!graph[id]) return { title: "Error", metadata: {}, output: `Task ${id} not found.` }
+              // De-track AND hard-stop the running subagent (kill its background job,
+              // free its tokens). Only for agents you're sure are stuck/looping/wrong
+              // — killing loses whatever they might still have produced.
+              yield* store.setTaskGraph(TaskGraph.abandonTask(graph, id))
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
               let killed = 0
               if (flags.experimentalOrchestrator) killed = yield* spawn.cancel(_ctx, id)
               return {
-                title: `Abandoned ${id}`,
+                title: `Killed ${id}`,
                 metadata: { killed },
-                output: `Task ${id} abandoned.${killed > 0 ? ` Stopped ${killed} running subagent(s) — no more tokens spent on it.` : ""}`,
+                output:
+                  killed > 0
+                    ? `Task ${id} hard-stopped — ${killed} subagent(s) killed, no more tokens spent on it. Siblings unaffected.`
+                    : `Task ${id} marked killed, but no running subagent was found (already finished, or not orchestrator-spawned).`,
               }
             }
 
