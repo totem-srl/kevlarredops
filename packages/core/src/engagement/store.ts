@@ -52,6 +52,12 @@ export interface Interface {
   readonly updateScope: (scope: Partial<EngagementSchema.Scope>) => Effect.Effect<void>
   readonly getTaskGraph: () => Effect.Effect<TaskGraph.TaskNodes>
   readonly setTaskGraph: (tasks: TaskGraph.TaskNodes) => Effect.Effect<void>
+  // Atomic read-modify-write of the task graph. REQUIRED for the deterministic
+  // orchestrator: parallel background subagents complete concurrently, and a
+  // get()+set() pair interleaves between fibers, losing completion updates (a
+  // wave then never reaches quiescent). Ref.modify applies `fn` to the current
+  // value in one atomic step and returns the updated graph.
+  readonly modifyTaskGraph: (fn: (tasks: TaskGraph.TaskNodes) => TaskGraph.TaskNodes) => Effect.Effect<TaskGraph.TaskNodes>
   readonly setDomain: (domain: EngagementSchema.DomainState) => Effect.Effect<void>
   readonly updateDomain: (patch: Record<string, unknown>) => Effect.Effect<void>
   readonly addObjective: (objective: EngagementSchema.Objective) => Effect.Effect<void>
@@ -545,6 +551,15 @@ const layer = Layer.effect(
         const current = yield* Ref.get(stateRef)
         if (!current) return
         yield* Ref.set(stateRef, { ...current, task_graph: tasks as unknown as Record<string, unknown> })
+      }),
+
+      modifyTaskGraph: Effect.fn("EngagementStore.modifyTaskGraph")(function* (fn) {
+        return yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [{} as TaskGraph.TaskNodes, current]
+          const graph = (current.task_graph ?? {}) as unknown as TaskGraph.TaskNodes
+          const updated = fn(graph)
+          return [updated, { ...current, task_graph: updated as unknown as Record<string, unknown> }]
+        })
       }),
 
       setDomain: Effect.fn("EngagementStore.setDomain")(function* (domain) {

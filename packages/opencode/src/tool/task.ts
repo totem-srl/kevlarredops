@@ -10,12 +10,14 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope } from "effect"
+import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@pentestcode/core/database/database"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
+import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
+import { Orchestrator } from "@pentestcode/core/engagement/orchestrator"
 
 export interface TaskPromptOps {
   cancel(sessionID: SessionID): Effect.Effect<void>
@@ -195,6 +197,282 @@ function formatInterruptAlert(alert: EngagementSchema.Alert): string {
     `</interrupt-alert>`,
   ].join("\n")
 }
+
+// Compact objective prompt for an orchestrated node. Heavy context-carry
+// (CONTEXT_PROTOCOL, prior/other-agent work) is prepended by the spawner, so
+// this stays lean — objectives, not scripts.
+function buildObjectivePrompt(node: TaskGraph.TaskNode): string {
+  const parts = [node.description.trim()]
+  if (node.target) parts.push(`Target: ${node.target}.`)
+  if (node.technique) parts.push(`Technique/approach: ${node.technique}.`)
+  parts.push(
+    "Confirmed vulns, credentials, and already-settled vectors are in engagement state — query with state_query before acting, do NOT re-test what is resolved/confirmed, and record every finding via state_update / the parser tools.",
+  )
+  return parts.join(" ")
+}
+
+export interface PumpResult {
+  spawnable: TaskGraph.TaskNode[]
+  deferred: TaskGraph.TaskNode[]
+  skipped: { node: TaskGraph.TaskNode; reason: string }[]
+  needsAgent: TaskGraph.TaskNode[]
+}
+
+// AR1 deterministic orchestrator, ROLLING PIPELINE. Built once at tool
+// construction (where layer requirements are satisfied) and returns a `pump`
+// with R=never so a tool's execute can call it. TaskTool itself is untouched —
+// the flag-off path can never regress.
+//
+// `pump(ctx)` fills free concurrency slots with any task whose deps are already
+// satisfied (not the whole "wave"), paced by a stagger to avoid bursting the
+// provider into rate limits, and serialized by a semaphore so concurrent
+// completions can't over-fill. Each spawned subagent, on settle, marks its node
+// done atomically and calls `pump` again to refill freed slots immediately — so
+// the pipeline never stalls on a straggler. The coordinator steers at PLAN
+// boundaries (it declared the DAG; it's told to plan again only when the DAG
+// drains) and via interrupt alerts; it never has to hand-dispatch.
+export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(function* () {
+  const agent = yield* Agent.Service
+  const background = yield* BackgroundJob.Service
+  const config = yield* Config.Service
+  const sessions = yield* Session.Service
+  const scope = yield* Scope.Scope
+  const database = yield* Database.Service
+  const engagementStore = yield* EngagementStore.Service
+  const flags = yield* RuntimeFlags.Service
+  const cap = flags.orchestratorConcurrency ?? Orchestrator.DEFAULT_CONCURRENCY
+  const staggerMs = flags.orchestratorStaggerMs ?? 800
+  const pumpLock = Semaphore.makeUnsafe(1)
+
+  // REAL in-flight count from the background-job registry — the source of truth
+  // for free slots (graph status can lag).
+  const realInFlight = (ctx: Tool.Context) =>
+    background
+      .list()
+      .pipe(
+        Effect.map(
+          (jobs) =>
+            jobs.filter(
+              (j) => j.type === id && j.status === "running" && j.metadata?.parentSessionId === ctx.sessionID,
+            ).length,
+        ),
+      )
+
+  const spawnOne = (ctx: Tool.Context, node: TaskGraph.TaskNode) =>
+    Effect.gen(function* () {
+      const subagentType = node.assignedAgent!
+      const description = node.description
+      const cfg = yield* config.get()
+      const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
+      if (!ops) return
+
+      const next = yield* agent.get(subagentType)
+      if (!next) return
+
+      const parent = yield* sessions.get(ctx.sessionID)
+      const childPermission = deriveSubagentSessionPermission({
+        parentSessionPermission: parent.permission ?? [],
+        subagent: next,
+      })
+      const childToolDenies = [
+        ...(next.permission.some((rule) => rule.permission === "todowrite")
+          ? []
+          : [{ permission: "todowrite" as const, pattern: "*" as const, action: "deny" as const }]),
+        ...(next.permission.some((rule) => rule.permission === id)
+          ? []
+          : [{ permission: id, pattern: "*" as const, action: "deny" as const }]),
+        ...(cfg.experimental?.primary_tools?.map((permission) => ({
+          permission,
+          pattern: "*" as const,
+          action: "deny" as const,
+        })) ?? []),
+      ]
+      const nextSession = yield* sessions.create({
+        parentID: ctx.sessionID,
+        title: description + ` (@${next.name} subagent)`,
+        agent: next.name,
+        permission: [
+          ...childPermission,
+          ...childToolDenies.filter(
+            (deny) =>
+              !childPermission.some(
+                (rule) =>
+                  rule.permission === deny.permission &&
+                  rule.pattern === deny.pattern &&
+                  rule.action === deny.action,
+              ),
+          ),
+        ],
+      })
+
+      const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(
+        Effect.provideService(Database.Service, database),
+        Effect.orDie,
+      )
+      if (msg.info.role !== "assistant") return
+      const variant = msg.info.variant
+      const model = next.model ?? { modelID: msg.info.modelID, providerID: msg.info.providerID }
+      const metadata = {
+        parentSessionId: ctx.sessionID,
+        sessionId: nextSession.id,
+        model,
+        background: true,
+        taskNodeId: node.id,
+      }
+
+      const priorContexts = yield* engagementStore.getAgentContexts(subagentType, 5)
+      const recentContexts = yield* engagementStore.getRecentAgentContexts(10)
+      const otherAgents = recentContexts.filter((c) => c.agent_type !== subagentType).slice(0, 6)
+      const siblings = (yield* background.list()).filter(
+        (j) =>
+          j.type === id &&
+          j.status === "running" &&
+          j.metadata?.parentSessionId === ctx.sessionID &&
+          j.metadata?.sessionId !== nextSession.id,
+      )
+      const blocks: string[] = [CONTEXT_PROTOCOL]
+      if (priorContexts.length > 0) blocks.push(formatPriorContext(priorContexts))
+      if (otherAgents.length > 0) blocks.push(formatOtherAgentsWork(otherAgents))
+      if (siblings.length > 0) blocks.push(formatInFlightSiblings(siblings))
+      const augmentedPrompt = blocks.join("\n\n") + "\n\n" + buildObjectivePrompt(node)
+
+      const runTask = Effect.fn("Orchestrator.runTask")(function* () {
+        const parts = yield* ops.resolvePromptParts(augmentedPrompt)
+        const result = yield* ops.prompt({
+          messageID: MessageID.ascending(),
+          sessionID: nextSession.id,
+          model: { modelID: model.modelID, providerID: model.providerID },
+          variant: next.model ? undefined : variant,
+          agent: next.name,
+          parts,
+        })
+        return result.parts.findLast((item) => item.type === "text")?.text ?? ""
+      })
+
+      const inject = Effect.fn("Orchestrator.inject")(function* (
+        state: "running" | "completed" | "error",
+        text: string,
+      ) {
+        const currentParent = yield* sessions.get(ctx.sessionID)
+        yield* ops
+          .prompt({
+            sessionID: ctx.sessionID,
+            agent: currentParent.agent ?? ctx.agent,
+            variant,
+            parts: [
+              {
+                type: "text",
+                synthetic: true,
+                text: renderOutput({
+                  sessionID: nextSession.id,
+                  state,
+                  summary:
+                    state === "completed"
+                      ? `Subagent completed: ${description}`
+                      : state === "error"
+                        ? `Subagent failed: ${description}`
+                        : `Interrupt alert for: ${description}`,
+                  text,
+                }),
+              },
+            ],
+          })
+          .pipe(Effect.ignore, Effect.forkIn(scope, { startImmediately: true }))
+      })
+
+      // On settle: atomically mark the node done, refill freed slots (rolling —
+      // no straggler wait), then inject the result. When the whole DAG has
+      // drained, nudge the coordinator for the next plan (completion is its call).
+      const onSettle = Effect.fn("Orchestrator.onSettle")(function* (status: "completed" | "error", text: string) {
+        yield* engagementStore.modifyTaskGraph((g) =>
+          status === "completed"
+            ? TaskGraph.completeTask(g, node.id, text.slice(0, 200))
+            : TaskGraph.failTask(g, node.id, text.slice(0, 200)),
+        )
+        const saved = yield* engagementStore.get()
+        if (saved) yield* engagementStore.save(saved)
+        yield* engagementStore.addAgentContext(
+          buildContextSummary({ description, subagent_type: subagentType }, nextSession.id, status, text),
+        )
+
+        // Rolling refill: dependents whose deps just cleared start now.
+        yield* pump(ctx)
+
+        const running = yield* realInFlight(ctx)
+        const ws = Orchestrator.waveStatus(yield* engagementStore.getTaskGraph())
+        const drained = running === 0 && ws.ready.length === 0 && ws.inFlight.length === 0
+        const note = drained
+          ? `\n\n[orchestrator] All planned tasks are settled and nothing is running (blocked: ${ws.blocked.length}). Give the next objectives via task_graph plan, or conclude against coverage/objectives — do NOT stop early if objectives remain.`
+          : `\n\n[orchestrator] ${running} subagent(s) running; the harness auto-dispatches dependent tasks as slots free. You'll be notified as each finishes — do not poll.`
+        yield* inject(status, text + note)
+      })
+
+      const notify = Effect.fn("Orchestrator.notify")(function* (jobID: string) {
+        yield* background.wait({ id: jobID }).pipe(
+          Effect.flatMap((result) =>
+            Effect.gen(function* () {
+              if (result.info?.status === "completed") yield* onSettle("completed", result.info.output ?? "")
+              else if (result.info?.status === "error") yield* onSettle("error", result.info.error ?? "")
+            }),
+          ),
+          Effect.forkIn(scope, { startImmediately: true }),
+        )
+      })
+
+      const info = yield* background.start({
+        id: nextSession.id,
+        type: id,
+        title: description,
+        metadata,
+        onPromote: notify(nextSession.id),
+        run: runTask().pipe(Effect.onInterrupt(() => ops.cancel(nextSession.id))),
+      })
+      yield* notify(info.id)
+
+      yield* Effect.gen(function* () {
+        while (true) {
+          yield* Effect.sleep("2 seconds")
+          const alerts = yield* engagementStore.drainInterruptAlerts()
+          for (const alert of alerts) yield* inject("running", formatInterruptAlert(alert))
+        }
+      }).pipe(Effect.interruptible, Effect.forkIn(scope, { startImmediately: true }))
+    })
+
+  // Fill free slots with ready tasks (deps satisfied), paced + serialized.
+  const pump = (ctx: Tool.Context): Effect.Effect<PumpResult> =>
+    pumpLock.withPermits(1)(
+      Effect.gen(function* () {
+        const cur = yield* engagementStore.get()
+        const resolvedVectors = cur?.resolved_vectors ?? []
+        const graph = yield* engagementStore.getTaskGraph()
+        const inFlight = yield* realInFlight(ctx)
+        const sel = Orchestrator.selectWave(graph, { concurrency: cap, inFlight, resolvedVectors })
+        const spawnable = sel.spawn.filter((n) => !!n.assignedAgent)
+        const needsAgent = sel.spawn.filter((n) => !n.assignedAgent)
+
+        if (sel.skipped.length > 0 || spawnable.length > 0) {
+          yield* engagementStore.modifyTaskGraph((g) => {
+            let x = g
+            for (const s of sel.skipped) x = TaskGraph.abandonTask(x, s.node.id)
+            for (const n of spawnable) {
+              x = TaskGraph.updateTask(x, n.id, { status: "dispatched", assignedAgent: n.assignedAgent })
+            }
+            return x
+          })
+          const saved = yield* engagementStore.get()
+          if (saved) yield* engagementStore.save(saved)
+        }
+
+        for (const [i, n] of spawnable.entries()) {
+          if (i > 0 && staggerMs > 0) yield* Effect.sleep(`${staggerMs} millis`)
+          yield* spawnOne(ctx, n)
+        }
+        return { spawnable, deferred: sel.deferred, skipped: sel.skipped, needsAgent }
+      }),
+    ).pipe(Effect.orDie)
+
+  return { pump }
+})
 
 export const TaskTool = Tool.define(
   id,

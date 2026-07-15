@@ -3,6 +3,8 @@ import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { RuntimeFlags } from "@/effect/runtime-flags"
+import { makeOrchestratedSpawner } from "./task"
 import DESCRIPTION from "./task-graph.txt"
 import * as Tool from "./tool"
 
@@ -73,6 +75,40 @@ export const TaskGraphTool = Tool.define(
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
     const events = yield* EventV2Bridge.Service
+    const flags = yield* RuntimeFlags.Service
+    const spawn = yield* makeOrchestratedSpawner()
+
+    // AR1: fill free concurrency slots via the rolling pump (cap-limited,
+    // ledger-aware, paced). The pump also auto-refills as subagents complete, so
+    // this is just the initial kick + the coordinator's "launch what's ready" verb.
+    const dispatchReadyWave = Effect.fn("task_graph.dispatchReadyWave")(function* (
+      ctx: Tool.Context,
+      prefix: string,
+    ) {
+      const r = yield* spawn.pump(ctx)
+      const lines = [
+        `${prefix} Dispatched ${r.spawnable.length} subagent(s)${
+          r.spawnable.length > 0 ? `: ${r.spawnable.map((n) => `${n.id}→${n.assignedAgent}`).join(", ")}` : ""
+        }.`,
+      ]
+      if (r.deferred.length > 0)
+        lines.push(
+          `${r.deferred.length} ready but over the concurrency cap — the harness auto-launches them as slots free.`,
+        )
+      if (r.skipped.length > 0)
+        lines.push(
+          `Skipped ${r.skipped.length} (already-resolved dead-end vector): ${r.skipped.map((s) => s.node.id).join(", ")}.`,
+        )
+      if (r.needsAgent.length > 0)
+        lines.push(
+          `${r.needsAgent.length} ready task(s) have no assignedAgent and were NOT dispatched: ${r.needsAgent.map((n) => n.id).join(", ")}. Re-plan them with an agent.`,
+        )
+      lines.push(
+        "Subagents run in the background; the harness auto-dispatches dependent tasks as slots free — do NOT poll. You'll be notified as each finishes; plan again only when the DAG drains.",
+      )
+      return { title: `Dispatched ${r.spawnable.length}`, metadata: {}, output: lines.join("\n") } as Tool.ExecuteResult
+    })
+
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -116,6 +152,12 @@ export const TaskGraphTool = Tool.define(
                 dependsOn?: string[]
               }>
               if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {
+                // Orchestrator (Wave-confirm): plan with no new tasks means
+                // "launch the current ready wave" — how the coordinator approves
+                // the next wave after seeing the previous wave's results.
+                if (flags.experimentalOrchestrator) {
+                  return yield* dispatchReadyWave(_ctx, "Launching ready wave.")
+                }
                 return {
                   title: "Error",
                   metadata: {},
@@ -171,6 +213,13 @@ export const TaskGraphTool = Tool.define(
               }
               const ready = TaskGraph.getReady(graph)
               const skipNote = skipped.length > 0 ? ` Skipped ${skipped.length} malformed: ${skipped.join(", ")}.` : ""
+              // Orchestrator: adding tasks atomically launches the ready wave —
+              // collapses the old plan→task→dispatch dance into one call. The
+              // coordinator still authored the plan; the harness only runs the
+              // mechanics. Flag OFF → unchanged manual behavior below.
+              if (flags.experimentalOrchestrator) {
+                return yield* dispatchReadyWave(_ctx, `Added ${newNodes.length} tasks.${skipNote}`)
+              }
               return {
                 title: `Planned ${newNodes.length} tasks`,
                 metadata: {},

@@ -1434,6 +1434,19 @@ const layer = Layer.effect(
                     if (ready.length > 0) {
                       lines.push(`  Ready to dispatch: ${ready.map((t) => t.id).join(", ")}`)
                     }
+                    // AR1 wake-time advance nudge. Keyed off REAL liveness
+                    // (background registry), not graph status, so it fires even if
+                    // a completion inject was missed: whenever the coordinator takes
+                    // any turn with nothing actually running and a wave ready, it is
+                    // told to launch it. Advancement no longer depends on every
+                    // per-completion inject landing.
+                    if (flags.experimentalOrchestrator && liveRunning.length === 0 && ready.length > 0) {
+                      lines.push(
+                        `  ⚡ WAVE READY — no subagent is running and ${ready.length} task(s) are ready (${ready
+                          .map((t) => t.id)
+                          .join(", ")}). Call task_graph plan with NO new tasks NOW to launch this wave. Do not poll or wait.`,
+                      )
+                    }
                     lines.push("</task-graph>")
                   }
 
@@ -1544,6 +1557,23 @@ const layer = Layer.effect(
 
                   if (state.mode === "auto" && agent.name === "pentest") {
                     lines.push("", ORCHESTRATOR_MODE)
+                  }
+
+                  // AR1: when the deterministic orchestrator is enabled, `plan` is
+                  // the single orchestration verb — the harness runs dispatch,
+                  // collection, and status. Only the coordinator plans.
+                  if (flags.experimentalOrchestrator && isCoordinator) {
+                    lines.push(
+                      "",
+                      "<orchestrator-dag>",
+                      "Deterministic orchestrator is ON. `task_graph plan` is your ONLY orchestration verb.",
+                      "- Emit objectives once: {tasks:[{id, description, assignedAgent, target?, technique?, dependsOn?}]}. The harness immediately dispatches the ready wave (deps satisfied) up to the concurrency cap and runs every subagent in the background.",
+                      "- Do NOT call task_graph dispatch/complete/status/list_ready and do NOT spawn subagents by hand with the task tool — the harness owns dispatch, result collection, and status. Do NOT poll.",
+                      "- You are notified as each subagent finishes. When a wave completes you'll see the next ready set: call `plan` with NO new tasks to launch it as-is, or `plan` with new/changed objectives to adapt based on what the finished wave found.",
+                      "- Every strategic decision stays yours: what to plan, whether to launch the next wave, and whether the engagement is done. A wave finishing is NOT completion — judge that against objectives and coverage, and do not stop early.",
+                      "- Vectors already settled appear in <resolved-vectors>; the harness will not re-dispatch a resolved dead end.",
+                      "</orchestrator-dag>",
+                    )
                   }
                   return lines.join("\n")
                 } catch {

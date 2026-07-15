@@ -56,43 +56,32 @@ export function SubagentBar() {
   }
 
   const subagents = createMemo<Entry[]>(() => {
-    const msgs = sync.data.message[route.sessionID] ?? []
-    const byChild = new Map<string, Entry>()
-    for (const m of msgs) {
-      for (const part of sync.data.part[m.id] ?? []) {
-        if (part.type !== "tool" || part.tool !== "task") continue
-        const state = (part as ToolPart).state
-        // Pending tasks have no child session yet; skip until spawned. This
-        // also narrows the union so metadata/input are accessible below.
-        if (state.status === "pending") continue
-        const childID = stringValue(state.metadata?.sessionId)
-        if (!childID) continue
-        // Child-session liveness is the source of truth for "running", not the task
-        // part's status: a background subagent's part flips to "completed" the moment
-        // it's dispatched while the child keeps working, so keying off the part alone
-        // would drop it immediately. A present session_status entry means busy (idle
-        // deletes it — see session/status.ts), matching the nav's isActiveChild.
-        const childStatus = sync.data.session_status[childID]
-        const childActive = childStatus !== undefined && childStatus.type !== "idle"
-
-        let status: Status
-        if (state.status === "running" || childActive) status = "running"
-        else if (state.status === "error") status = "error"
-        else status = "done"
-
-        byChild.set(childID, {
-          sessionID: childID,
-          label: Locale.titlecase(stringValue(state.input?.subagent_type) ?? "Agent"),
-          description: stringValue(state.input?.description) ?? "",
-          status,
-          detail: status === "running" ? childActivity(childID) : undefined,
-        })
-      }
+    // Derive from CHILD SESSIONS, not from `task` tool parts. Both spawn paths —
+    // the manual `task` tool and the deterministic orchestrator (which dispatches
+    // from inside a single `task_graph` call, so there is no per-subagent `task`
+    // part) — create a child session titled "<desc> (@<agent> subagent)". Keying
+    // off child sessions makes the bar work for either, and matches how the nav
+    // and session tree already enumerate children (routes/session/index.tsx).
+    const rootID = route.sessionID
+    const entries: Entry[] = []
+    for (const child of sync.data.session) {
+      if (child.parentID !== rootID) continue
+      const agentMatch = child.title?.match(/@(\w+) subagent/)
+      if (!agentMatch) continue // only real subagent sessions, not hidden utility ones
+      // Child-session liveness is the source of truth for "running": a present
+      // session_status entry means busy (idle deletes it — see session/status.ts).
+      const childStatus = sync.data.session_status[child.id]
+      const childActive = childStatus !== undefined && childStatus.type !== "idle"
+      if (!childActive) continue // bar tracks in-flight work only; finished ones drop
+      entries.push({
+        sessionID: child.id,
+        label: Locale.titlecase(agentMatch[1]),
+        description: (child.title ?? "").replace(/\s*\(@\w+ subagent\)\s*$/, "").trim(),
+        status: "running",
+        detail: childActivity(child.id),
+      })
     }
-    // Only live subagents. Finished ones are removed as soon as they complete —
-    // the bar tracks in-flight work, not history. Completed subagents stay
-    // reachable through the session list for reviewing their results.
-    return Array.from(byChild.values()).filter((e) => e.status === "running")
+    return entries
   })
 
   const shown = createMemo(() => subagents().slice(0, MAX_ROWS))
