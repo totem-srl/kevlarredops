@@ -123,10 +123,10 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               !(isRecord(result.metadata) && result.metadata.summarized === true)
             ) {
               const raw = result.output
-              const digest = yield* input
+              const res = yield* input
                 .summarize({ text: raw, tool: item.id })
                 .pipe(Effect.catch(() => Effect.succeed(undefined)))
-              if (digest) {
+              if (res && "digest" in res) {
                 const existingRef =
                   isRecord(result.metadata) && typeof result.metadata.outputPath === "string"
                     ? result.metadata.outputPath
@@ -136,7 +136,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                   (yield* truncate.write(raw).pipe(Effect.catch(() => Effect.succeed(undefined))))
                 processed = {
                   ...result,
-                  output: `${digest}\n\n[Cheap-model digest of ${raw.length}-byte raw output.${
+                  output: `${res.digest}\n\n[Cheap-model digest of ${raw.length}-byte raw output.${
                     ref ? ` Full raw output saved to ${ref} — read that file if you need exact detail.` : ""
                   }]`,
                   metadata: {
@@ -144,6 +144,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
                     summarized: true,
                     original_bytes: raw.length,
                     ...(ref ? { outputPath: ref } : {}),
+                  },
+                }
+              } else if (res && "error" in res) {
+                // Offload was attempted but the small model failed — keep the raw
+                // output and surface the reason inline so it's not a silent no-op.
+                processed = {
+                  ...result,
+                  output: `${result.output}\n\n[AR2 cheap-model offload UNAVAILABLE: ${res.error} — using raw output. Check small_model config / plan entitlement.]`,
+                  metadata: {
+                    ...(isRecord(result.metadata) ? result.metadata : {}),
+                    ar2_error: res.error,
                   },
                 }
               }

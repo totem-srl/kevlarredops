@@ -46,7 +46,13 @@ export interface SummarizeInput {
   tool: string
 }
 
-export type Summarizer = (input: SummarizeInput) => Effect.Effect<string | undefined>
+// Explicit outcome so failures are VISIBLE instead of a silent no-op:
+//  - undefined      → tool not eligible / digest not worthwhile → keep raw, no note
+//  - { digest }     → success, use the compact digest
+//  - { error }      → offload was attempted but the small model call failed →
+//                     keep raw AND surface the reason so the cause is catchable
+export type SummarizeResult = { digest: string } | { error: string } | undefined
+export type Summarizer = (input: SummarizeInput) => Effect.Effect<SummarizeResult>
 
 /**
  * Build a tool-output summarizer bound to a resolved small model. Returns a
@@ -65,6 +71,7 @@ export function makeToolOutputSummarizer(deps: {
     Effect.gen(function* () {
       if (!SUMMARIZE_TOOLS.has(input.tool)) return undefined
       const raw = input.text
+      let errReason: string | undefined
       const digest = yield* deps
         .stream({
           agent: deps.agent,
@@ -87,12 +94,21 @@ export function makeToolOutputSummarizer(deps: {
           Stream.map((e) => e.text),
           Stream.mkString,
           Effect.timeout("45 seconds"),
+          // Capture + log the REAL failure instead of swallowing it, so a
+          // misconfigured / unavailable small model is diagnosable.
+          Effect.tapError((err) => {
+            errReason = String(err).slice(0, 240)
+            return Effect.logWarning(
+              `[AR2] small_model offload call failed for tool '${input.tool}' (model ${deps.model.providerID}/${deps.model.api.id}): ${errReason}`,
+            )
+          }),
           Effect.catch(() => Effect.succeed("")),
         )
+      if (errReason) return { error: errReason }
       const cleaned = digest.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim()
       // Only accept a digest that is actually smaller than the raw; otherwise the
       // offload bought nothing and the raw is more faithful.
       if (!cleaned || cleaned.length >= raw.length) return undefined
-      return cleaned
+      return { digest: cleaned }
     })
 }

@@ -15,7 +15,7 @@ function fakeStream(text: string | null) {
 function summarizer(text: string | null) {
   return makeToolOutputSummarizer({
     stream: fakeStream(text) as any,
-    model: {} as any,
+    model: { providerID: "test", api: { id: "small" } } as any,
     agent: {} as any,
     user: {} as any,
     sessionID: "ses_test",
@@ -40,13 +40,13 @@ describe("makeToolOutputSummarizer", () => {
     const s = summarizer("open ports: 22/ssh, 80/http; cred admin:admin found")
     const raw = "y".repeat(9000)
     const out = await Effect.runPromise(s({ text: raw, tool: "bash" }))
-    expect(out).toBe("open ports: 22/ssh, 80/http; cred admin:admin found")
+    expect(out).toEqual({ digest: "open ports: 22/ssh, 80/http; cred admin:admin found" })
   })
 
   test("strips <think> blocks from the digest", async () => {
     const s = summarizer("<think>let me reason</think>\n\nport 443/https open")
     const out = await Effect.runPromise(s({ text: "z".repeat(9000), tool: "bash" }))
-    expect(out).toBe("port 443/https open")
+    expect(out).toEqual({ digest: "port 443/https open" })
   })
 
   test("rejects a digest that is not smaller than the raw (offload bought nothing)", async () => {
@@ -60,5 +60,13 @@ describe("makeToolOutputSummarizer", () => {
     const s = summarizer("")
     const out = await Effect.runPromise(s({ text: "w".repeat(9000), tool: "bash" }))
     expect(out).toBeUndefined()
+  })
+
+  test("surfaces an error result when the small model call fails (visibility, not silent)", async () => {
+    // fakeStream(null) fails when consumed — for an eligible tool this must NOT
+    // be swallowed; it must come back as { error } so the cause is visible.
+    const s = summarizer(null)
+    const out = await Effect.runPromise(s({ text: "v".repeat(9000), tool: "bash" }))
+    expect(out && "error" in out).toBe(true)
   })
 })

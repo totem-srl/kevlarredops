@@ -1293,6 +1293,21 @@ const layer = Layer.effect(
             const smallModel = yield* provider
               .getSmallModel(model.providerID)
               .pipe(Effect.catch(() => Effect.succeed(undefined)))
+            // Visibility: if small_model is configured but did NOT resolve, the
+            // offload is silently off — say so (once per session) instead of
+            // leaving the user to wonder why AR2 never fires.
+            if (step <= 1) {
+              const configuredSmall = (yield* config.get()).small_model
+              if (configuredSmall && !smallModel) {
+                yield* Effect.logWarning(
+                  `[AR2] small_model '${configuredSmall}' is configured but did NOT resolve to a usable model on provider '${model.providerID}' — cheap-model offload is DISABLED. Verify the model id and that your plan serves it (try selecting it as the main model to confirm it responds).`,
+                )
+              } else if (smallModel) {
+                yield* Effect.logInfo(
+                  `[AR2] cheap-model offload active: ${smallModel.providerID}/${smallModel.api.id}`,
+                )
+              }
+            }
             const summarize = smallModel
               ? makeToolOutputSummarizer({
                   stream: llm.stream,
