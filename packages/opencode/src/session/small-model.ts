@@ -16,8 +16,10 @@ import type { LLM } from "./llm"
 
 // Outputs at or above this many characters are candidates for offload. Below it,
 // the replay cost is small enough that keeping the raw output verbatim is cheaper
-// than a round-trip to the small model.
-export const SUMMARIZE_THRESHOLD = 6000
+// than a round-trip to the small model. Set at 10KB (not lower) to protect DEPTH:
+// mid-size raw outputs stay verbatim so a subtle-but-crucial detail on a hard
+// challenge isn't compressed away — only genuinely large dumps get digested.
+export const SUMMARIZE_THRESHOLD = 10000
 
 // Cap the text actually SENT to the small model. Large scan dumps make the
 // offload call slow enough to time out (and it competes for provider
