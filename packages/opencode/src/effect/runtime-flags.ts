@@ -50,6 +50,11 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   // Delay in ms between spawns within a single pump, to pace provider load and
   // avoid bursting into rate limits. undefined -> code default.
   orchestratorStaggerMs: positiveInteger("OPENCODE_ORCHESTRATOR_STAGGER_MS"),
+  // Max concurrent main-model LLM streams per provider (coordinator + subagents).
+  // Caps outbound concurrency so a fan-out doesn't saturate the provider into
+  // 429/529 overloads. undefined -> code default. Small-model (offload/title)
+  // streams use a separate, smaller pool.
+  llmMaxConcurrency: positiveInteger("OPENCODE_LLM_MAX_CONCURRENCY"),
   experimentalLspTy: bool("OPENCODE_EXPERIMENTAL_LSP_TY"),
   experimentalLspTool: enabledByExperimental("OPENCODE_EXPERIMENTAL_LSP_TOOL"),
   experimentalOxfmt: enabledByExperimental("OPENCODE_EXPERIMENTAL_OXFMT"),
