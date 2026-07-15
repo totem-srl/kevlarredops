@@ -1,0 +1,98 @@
+import { Effect, Stream } from "effect"
+import { LLMEvent } from "@pentestcode/llm"
+import type { Agent } from "../agent/agent"
+import type { Provider } from "@/provider/provider"
+import type { SessionV1 } from "@pentestcode/core/v1/session"
+import type { LLM } from "./llm"
+
+// AR2 (cheap-model offload) — NARROW scope: digest large raw tool outputs on the
+// small model before they enter the expensive model's transcript. The raw output
+// is kept retrievable by ref, so the strategist can always pull ground truth.
+//
+// Opt-in only: the summarizer is built solely when a small model resolves
+// (config `small_model`, or the provider's own small-model family). If none
+// resolves, no summarizer is passed and every tool output stays verbatim — we
+// never silently switch provider or drop detail.
+
+// Outputs at or above this many characters are candidates for offload. Below it,
+// the replay cost is small enough that keeping the raw output verbatim is cheaper
+// than a round-trip to the small model.
+export const SUMMARIZE_THRESHOLD = 6000
+
+// Only these tools' raw output is offloaded. Deliberately narrow: `bash` is where
+// the 10-50 KB scan/enumeration dumps come from. Structured/precision tools
+// (parsers, state_query, read, report_gen, …) are never summarized — their output
+// is already compact and the agent needs it verbatim.
+export const SUMMARIZE_TOOLS = new Set(["bash"])
+
+const SYSTEM = `You are a compression worker for a penetration-testing agent. You receive the raw stdout/stderr of a shell command (nmap, nuclei, gobuster, netexec, curl, cat, etc.). Produce a DENSE, factual digest that keeps everything the strategist needs and drops the rest.
+
+KEEP (verbatim, never mask or omit):
+- credentials, tokens, hashes, API keys, secrets, session cookies
+- open ports/services + versions, hostnames, URLs, endpoints, IPs, usernames
+- vulnerabilities, CVEs, error/stack-trace lines that indicate a finding
+- file paths, config values, flags, interesting response bodies
+
+DROP: banners, ASCII art, progress bars, spinners, decorative separators, repeated boilerplate, timing/percentage noise, help text.
+
+RULES:
+- Preserve exact strings for anything exploitable (creds/tokens/paths/versions/payloads). Do NOT paraphrase those.
+- Do NOT invent, infer, or add commentary, recommendations, or next steps.
+- If the output is an error, a timeout, or empty, say so in one line.
+- Output plain text. No markdown headers, no preamble like "Here is the digest".`
+
+export interface SummarizeInput {
+  text: string
+  tool: string
+}
+
+export type Summarizer = (input: SummarizeInput) => Effect.Effect<string | undefined>
+
+/**
+ * Build a tool-output summarizer bound to a resolved small model. Returns a
+ * function that yields a compact digest, or `undefined` when summarization
+ * failed / was empty / not worthwhile — in which case the caller keeps the raw
+ * output unchanged.
+ */
+export function makeToolOutputSummarizer(deps: {
+  stream: LLM.Interface["stream"]
+  model: Provider.Model
+  agent: Agent.Info
+  user: SessionV1.User
+  sessionID: string
+}): Summarizer {
+  return (input: SummarizeInput) =>
+    Effect.gen(function* () {
+      if (!SUMMARIZE_TOOLS.has(input.tool)) return undefined
+      const raw = input.text
+      const digest = yield* deps
+        .stream({
+          agent: deps.agent,
+          user: deps.user,
+          system: [SYSTEM],
+          small: true,
+          tools: {},
+          model: deps.model,
+          sessionID: deps.sessionID,
+          retries: 1,
+          messages: [
+            {
+              role: "user",
+              content: `Tool: ${input.tool}\nRaw output (${raw.length} bytes) follows — digest it:\n\n${raw}`,
+            },
+          ],
+        })
+        .pipe(
+          Stream.filter(LLMEvent.is.textDelta),
+          Stream.map((e) => e.text),
+          Stream.mkString,
+          Effect.timeout("45 seconds"),
+          Effect.catch(() => Effect.succeed("")),
+        )
+      const cleaned = digest.replace(/<think>[\s\S]*?<\/think>\s*/g, "").trim()
+      // Only accept a digest that is actually smaller than the raw; otherwise the
+      // offload bought nothing and the raw is more faithful.
+      if (!cleaned || cleaned.length >= raw.length) return undefined
+      return cleaned
+    })
+}

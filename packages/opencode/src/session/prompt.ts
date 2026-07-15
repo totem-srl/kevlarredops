@@ -45,6 +45,7 @@ import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { makeToolOutputSummarizer } from "./small-model"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -1286,6 +1287,22 @@ const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
+            // AR2: build the cheap-model tool-output summarizer, but only when a
+            // small model actually resolves (config `small_model` or the provider's
+            // own small family). No small model → no summarizer → outputs stay raw.
+            const smallModel = yield* provider
+              .getSmallModel(model.providerID)
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
+            const summarize = smallModel
+              ? makeToolOutputSummarizer({
+                  stream: llm.stream,
+                  model: smallModel,
+                  agent,
+                  user: lastUser,
+                  sessionID,
+                })
+              : undefined
+
             const tools = yield* SessionTools.resolve({
               agent,
               session,
@@ -1294,6 +1311,7 @@ const layer = Layer.effect(
               bypassAgentCheck,
               messages: msgs,
               promptOps,
+              summarize,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),

@@ -23,6 +23,7 @@ import { ProviderV2 } from "@pentestcode/core/provider"
 import { ModelV2 } from "@pentestcode/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { SUMMARIZE_THRESHOLD, type Summarizer } from "./small-model"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -46,6 +47,9 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   bypassAgentCheck: boolean
   messages: SessionV1.WithParts[]
   promptOps: TaskPromptOps
+  // AR2: cheap-model offload. Present only when a small model resolved; digests
+  // large raw tool outputs (e.g. bash scan dumps) before they hit the transcript.
+  summarize?: Summarizer
 }) {
   const tools: Record<string, AITool> = {}
   const run = yield* EffectBridge.make()
@@ -109,9 +113,44 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               { args },
             )
             const result = yield* item.execute(args, ctx)
+            // AR2: offload a large raw tool output to the cheap model. Keep the
+            // raw retrievable by ref so the strategist can pull ground truth.
+            let processed = result
+            if (
+              input.summarize &&
+              typeof result.output === "string" &&
+              result.output.length >= SUMMARIZE_THRESHOLD &&
+              !(isRecord(result.metadata) && result.metadata.summarized === true)
+            ) {
+              const raw = result.output
+              const digest = yield* input
+                .summarize({ text: raw, tool: item.id })
+                .pipe(Effect.catch(() => Effect.succeed(undefined)))
+              if (digest) {
+                const existingRef =
+                  isRecord(result.metadata) && typeof result.metadata.outputPath === "string"
+                    ? result.metadata.outputPath
+                    : undefined
+                const ref =
+                  existingRef ??
+                  (yield* truncate.write(raw).pipe(Effect.catch(() => Effect.succeed(undefined))))
+                processed = {
+                  ...result,
+                  output: `${digest}\n\n[Cheap-model digest of ${raw.length}-byte raw output.${
+                    ref ? ` Full raw output saved to ${ref} — read that file if you need exact detail.` : ""
+                  }]`,
+                  metadata: {
+                    ...(isRecord(result.metadata) ? result.metadata : {}),
+                    summarized: true,
+                    original_bytes: raw.length,
+                    ...(ref ? { outputPath: ref } : {}),
+                  },
+                }
+              }
+            }
             const output = {
-              ...result,
-              attachments: result.attachments?.map((attachment) => ({
+              ...processed,
+              attachments: processed.attachments?.map((attachment) => ({
                 ...attachment,
                 id: PartID.ascending(),
                 sessionID: ctx.sessionID,
