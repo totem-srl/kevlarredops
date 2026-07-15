@@ -19,6 +19,13 @@ import type { LLM } from "./llm"
 // than a round-trip to the small model.
 export const SUMMARIZE_THRESHOLD = 6000
 
+// Cap the text actually SENT to the small model. Large scan dumps make the
+// offload call slow enough to time out (and it competes for provider
+// concurrency). The full raw output is still kept retrievable by ref, so
+// digesting a head+tail sample is safe — the digest is lossy either way and the
+// ref holds ground truth.
+export const MAX_DIGEST_INPUT = 16000
+
 // Only these tools' raw output is offloaded. Deliberately narrow: `bash` is where
 // the 10-50 KB scan/enumeration dumps come from. Structured/precision tools
 // (parsers, state_query, read, report_gen, …) are never summarized — their output
@@ -71,6 +78,14 @@ export function makeToolOutputSummarizer(deps: {
     Effect.gen(function* () {
       if (!SUMMARIZE_TOOLS.has(input.tool)) return undefined
       const raw = input.text
+      // Head+tail sample so the small model isn't fed (and slowed by) the whole
+      // dump. Scan output is front-loaded; the tail often holds the summary line.
+      const sample =
+        raw.length > MAX_DIGEST_INPUT
+          ? raw.slice(0, MAX_DIGEST_INPUT - 4000) +
+            "\n\n...[middle truncated for digest — full output kept in the ref]...\n\n" +
+            raw.slice(-4000)
+          : raw
       let errReason: string | undefined
       const digest = yield* deps
         .stream({
@@ -85,7 +100,9 @@ export function makeToolOutputSummarizer(deps: {
           messages: [
             {
               role: "user",
-              content: `Tool: ${input.tool}\nRaw output (${raw.length} bytes) follows — digest it:\n\n${raw}`,
+              content: `Tool: ${input.tool}\nRaw output (${raw.length} bytes total${
+                raw.length > MAX_DIGEST_INPUT ? `, showing a head+tail sample` : ""
+              }) — digest it:\n\n${sample}`,
             },
           ],
         })
@@ -93,7 +110,7 @@ export function makeToolOutputSummarizer(deps: {
           Stream.filter(LLMEvent.is.textDelta),
           Stream.map((e) => e.text),
           Stream.mkString,
-          Effect.timeout("45 seconds"),
+          Effect.timeout("90 seconds"),
           // Capture + log the REAL failure instead of swallowing it, so a
           // misconfigured / unavailable small model is diagnosable.
           Effect.tapError((err) => {
