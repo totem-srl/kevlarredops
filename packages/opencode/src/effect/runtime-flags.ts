@@ -41,10 +41,13 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   enableQuestionTool: bool("OPENCODE_ENABLE_QUESTION_TOOL"),
   experimentalReferences: enabledByExperimental("OPENCODE_EXPERIMENTAL_REFERENCES"),
   experimentalBackgroundSubagents: enabledByExperimental("OPENCODE_EXPERIMENTAL_BACKGROUND_SUBAGENTS"),
-  // AR1 deterministic orchestrator. Plain bool (NOT enabledByExperimental) so it
-  // is enabled ONLY by an explicit opt-in — never turned on as a side effect of
-  // the broad OPENCODE_EXPERIMENTAL flag. Default OFF = today's task_graph path.
-  experimentalOrchestrator: bool("OPENCODE_EXPERIMENTAL_ORCHESTRATOR"),
+  // Deterministic orchestrator — DEFAULT ON as of 0.2.2 (validated on a real
+  // multi-host pivot run: healthy dispatch, overload -87%, authentic lateral
+  // movement). Kill-switch: OPENCODE_DISABLE_ORCHESTRATOR=true falls back to the
+  // manual task_graph/task path if a regression surfaces in the wild. (Field
+  // name kept as-is to avoid churn across call sites; it is no longer gated by
+  // OPENCODE_EXPERIMENTAL_ORCHESTRATOR.)
+  experimentalOrchestrator: bool("OPENCODE_DISABLE_ORCHESTRATOR").pipe(Config.map((disabled) => !disabled)),
   // Max subagents the orchestrator keeps in flight at once (rolling pipeline cap).
   orchestratorConcurrency: positiveInteger("OPENCODE_ORCHESTRATOR_CONCURRENCY"),
   // Delay in ms between spawns within a single pump, to pace provider load and
