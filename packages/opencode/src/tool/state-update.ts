@@ -46,6 +46,7 @@ export const Parameters = Schema.Struct({
     "remove_network_segment",
     "record_wordlist",
     "set_pause",
+    "record_vector",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -801,6 +802,40 @@ export const StateUpdateTool = Tool.define(
             }
 
             // --- Alert Queue ---
+            case "record_vector": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const target = d.target as string
+              const vector = d.vector as string
+              const status = d.status as string
+              if (!target || !vector || !status) {
+                return {
+                  title: "Error",
+                  metadata: {},
+                  output: "Error: data.target (host:port/URL), data.vector (technique), and data.status (attempted|confirmed|resolved|blocked) are required for record_vector.",
+                }
+              }
+              const rec = {
+                id: (d.id as string) || `vec-${Date.now()}`,
+                timestamp: new Date().toISOString(),
+                target,
+                vector,
+                status: status as EngagementSchema.VectorStatus,
+                tested_by: d.tested_by as string | undefined,
+                attempts: d.attempts as number | undefined,
+                evidence: d.evidence as string | undefined,
+                revisit_when: d.revisit_when as string | undefined,
+              }
+              const { created } = yield* store.addResolvedVector(rec)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Vector: ${status}`,
+                metadata: { target, status, created },
+                output: `Vector ${created ? "recorded" : "updated (re-probe)"} [${status.toUpperCase()}]: ${target} :: ${vector}${status === "resolved" || status === "confirmed" ? " — will not be re-tested" : ""}`,
+              }
+            }
+
             case "add_alert": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }

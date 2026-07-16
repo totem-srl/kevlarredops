@@ -52,6 +52,12 @@ export interface Interface {
   readonly updateScope: (scope: Partial<EngagementSchema.Scope>) => Effect.Effect<void>
   readonly getTaskGraph: () => Effect.Effect<TaskGraph.TaskNodes>
   readonly setTaskGraph: (tasks: TaskGraph.TaskNodes) => Effect.Effect<void>
+  // Atomic read-modify-write of the task graph. REQUIRED for the deterministic
+  // orchestrator: parallel background subagents complete concurrently, and a
+  // get()+set() pair interleaves between fibers, losing completion updates (a
+  // wave then never reaches quiescent). Ref.modify applies `fn` to the current
+  // value in one atomic step and returns the updated graph.
+  readonly modifyTaskGraph: (fn: (tasks: TaskGraph.TaskNodes) => TaskGraph.TaskNodes) => Effect.Effect<TaskGraph.TaskNodes>
   readonly setDomain: (domain: EngagementSchema.DomainState) => Effect.Effect<void>
   readonly updateDomain: (patch: Record<string, unknown>) => Effect.Effect<void>
   readonly addObjective: (objective: EngagementSchema.Objective) => Effect.Effect<void>
@@ -92,6 +98,9 @@ export interface Interface {
   readonly getWordlistUsages: (filter?: { host_ip?: string; port?: number; tool_type?: string }) => Effect.Effect<readonly EngagementSchema.WordlistUsage[]>
   // Pause Behavior
   readonly setPauseBehavior: (behavior: EngagementSchema.PauseBehavior) => Effect.Effect<void>
+  // Resolved Vectors Ledger (R6 fix)
+  readonly addResolvedVector: (vector: EngagementSchema.ResolvedVector) => Effect.Effect<{ created: boolean }>
+  readonly getResolvedVectors: (filter?: { target?: string; status?: string }) => Effect.Effect<readonly EngagementSchema.ResolvedVector[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -544,6 +553,15 @@ const layer = Layer.effect(
         yield* Ref.set(stateRef, { ...current, task_graph: tasks as unknown as Record<string, unknown> })
       }),
 
+      modifyTaskGraph: Effect.fn("EngagementStore.modifyTaskGraph")(function* (fn) {
+        return yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [{} as TaskGraph.TaskNodes, current]
+          const graph = (current.task_graph ?? {}) as unknown as TaskGraph.TaskNodes
+          const updated = fn(graph)
+          return [updated, { ...current, task_graph: updated as unknown as Record<string, unknown> }]
+        })
+      }),
+
       setDomain: Effect.fn("EngagementStore.setDomain")(function* (domain) {
         const current = yield* Ref.get(stateRef)
         if (!current) return
@@ -880,6 +898,56 @@ const layer = Layer.effect(
         if (!current) return
         yield* Ref.set(stateRef, { ...current, pause_on_finding: behavior })
         yield* logChange("set_pause", "pause", behavior, `Pause on finding: ${behavior}`)
+      }),
+
+      addResolvedVector: Effect.fn("EngagementStore.addResolvedVector")(function* (vector) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return { created: false }
+        const existing = current.resolved_vectors ?? []
+        // Dedup by (target, vector): a repeat probe bumps attempts and promotes status.
+        const idx = existing.findIndex(
+          (v) => v.target === vector.target && v.vector === vector.vector,
+        )
+        let next: EngagementSchema.ResolvedVector[]
+        let created: boolean
+        if (idx >= 0) {
+          const prev = existing[idx]!
+          const merged: EngagementSchema.ResolvedVector = {
+            ...prev,
+            status: vector.status,
+            timestamp: vector.timestamp,
+            attempts: (prev.attempts ?? 1) + 1,
+            tested_by: vector.tested_by ?? prev.tested_by,
+            evidence: vector.evidence ?? prev.evidence,
+            revisit_when: vector.revisit_when ?? prev.revisit_when,
+          }
+          next = [...existing]
+          next[idx] = merged
+          created = false
+        } else {
+          next = [...existing, { ...vector, attempts: vector.attempts ?? 1 }]
+          created = true
+        }
+        const trimmed = next.length > EngagementSchema.RESOLVED_VECTORS_MAX
+          ? next.slice(next.length - EngagementSchema.RESOLVED_VECTORS_MAX)
+          : next
+        yield* Ref.set(stateRef, { ...current, resolved_vectors: trimmed })
+        yield* logChange(
+          "record_vector",
+          "vector",
+          vector.target,
+          `[${vector.status.toUpperCase()}] ${vector.target} :: ${vector.vector}${created ? "" : " (re-probe)"}`,
+        )
+        return { created }
+      }),
+
+      getResolvedVectors: Effect.fn("EngagementStore.getResolvedVectors")(function* (filter) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return []
+        let vectors = current.resolved_vectors ?? []
+        if (filter?.target) vectors = vectors.filter((v) => v.target === filter.target)
+        if (filter?.status) vectors = vectors.filter((v) => v.status === filter.status)
+        return vectors
       }),
     })
   }),

@@ -637,6 +637,11 @@ const layer = Layer.effect(
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
       yield* invalidateGlobal
+      // Also drop the per-directory merged-config cache that get() serves —
+      // invalidating only cachedGlobal left get() returning the boot-time config,
+      // so a config change from the UI (e.g. /small-model) never took effect in a
+      // running session until a full restart.
+      yield* InstanceState.invalidate(state)
     })
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {

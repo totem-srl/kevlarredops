@@ -29,10 +29,11 @@ export const Parameters = Schema.Struct({
     "segments",
     "ooda",
     "wordlists",
+    "resolved_vectors",
     "subagents",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), resolved_vectors (settled attack vectors — check before opening a vector; filter by status attempted|confirmed|resolved|blocked or a target substring), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -401,6 +402,34 @@ export const StateQueryTool = Tool.define(
                 title: label,
                 metadata: { count: filtered.length, total: rels.length },
                 output: `${label} (${filtered.length}):\n${lines.join("\n")}`,
+              }
+            }
+
+            case "resolved_vectors": {
+              const vectors = state.resolved_vectors ?? []
+              if (vectors.length === 0) {
+                return { title: "Resolved vectors", metadata: { count: 0 }, output: "No vectors settled yet. Record dead ends / confirmed vectors with state_update (action: record_vector) so no agent re-tests them." }
+              }
+              // filter can be a status (attempted|confirmed|resolved|blocked) or a target substring
+              const f = params.filter
+              const statuses = new Set(["attempted", "confirmed", "resolved", "blocked"])
+              let filtered = vectors
+              if (f) {
+                filtered = statuses.has(f.toLowerCase())
+                  ? vectors.filter((v) => v.status === f.toLowerCase())
+                  : vectors.filter((v) => v.target.includes(f) || v.vector.includes(f))
+              }
+              const lines = filtered.map((v) => {
+                const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
+                const by = v.tested_by ? ` by:${v.tested_by}` : ""
+                const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
+                return `  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${by}${why}`
+              })
+              const label = f ? `Resolved vectors [${f}]` : "Resolved vectors"
+              return {
+                title: label,
+                metadata: { count: filtered.length, total: vectors.length },
+                output: `${label} (${filtered.length}/${vectors.length}):\n${lines.join("\n")}`,
               }
             }
 

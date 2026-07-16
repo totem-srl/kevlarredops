@@ -45,6 +45,7 @@ import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { TaskTool, type TaskPromptOps } from "@/tool/task"
+import { makeToolOutputSummarizer } from "./small-model"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -1286,6 +1287,37 @@ const layer = Layer.effect(
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
             const promptOps = yield* ops()
 
+            // AR2: build the cheap-model tool-output summarizer, but only when a
+            // small model actually resolves (config `small_model` or the provider's
+            // own small family). No small model → no summarizer → outputs stay raw.
+            const smallModel = yield* provider
+              .getSmallModel(model.providerID)
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
+            // Visibility: if small_model is configured but did NOT resolve, the
+            // offload is silently off — say so (once per session) instead of
+            // leaving the user to wonder why AR2 never fires.
+            if (step <= 1) {
+              const configuredSmall = (yield* config.get()).small_model
+              if (configuredSmall && !smallModel) {
+                yield* Effect.logWarning(
+                  `[AR2] small_model '${configuredSmall}' is configured but did NOT resolve to a usable model on provider '${model.providerID}' — cheap-model offload is DISABLED. Verify the model id and that your plan serves it (try selecting it as the main model to confirm it responds).`,
+                )
+              } else if (smallModel) {
+                yield* Effect.logInfo(
+                  `[AR2] cheap-model offload active: ${smallModel.providerID}/${smallModel.api.id}`,
+                )
+              }
+            }
+            const summarize = smallModel
+              ? makeToolOutputSummarizer({
+                  stream: llm.stream,
+                  model: smallModel,
+                  agent,
+                  user: lastUser,
+                  sessionID,
+                })
+              : undefined
+
             const tools = yield* SessionTools.resolve({
               agent,
               session,
@@ -1294,6 +1326,7 @@ const layer = Layer.effect(
               bypassAgentCheck,
               messages: msgs,
               promptOps,
+              summarize,
             }).pipe(
               Effect.provideService(Plugin.Service, plugin),
               Effect.provideService(Permission.Service, permission),
@@ -1327,6 +1360,10 @@ const layer = Layer.effect(
                 try {
                   const state = yield* engagement.get()
                   if (!state) return undefined
+                  // Orchestration bookkeeping (task graph, live subagents, user
+                  // command hints) is a coordinator concern — injecting it into
+                  // every focused subagent's turn is pure noise. See redesign QW2.
+                  const isCoordinator = agent.mode !== "subagent"
                   const modeDirective = modeDirectives[state.mode] ?? ""
                   const transitionHint = phaseTransitionHint(state)
                   const lines = [
@@ -1383,12 +1420,14 @@ const layer = Layer.effect(
                   }
                   // Real subagent liveness from the background-job registry —
                   // the source of truth, unlike task-graph's self-reported status.
-                  const liveJobs = (yield* background.list()).filter(
-                    (j) => j.type === "task" && j.metadata?.parentSessionId === sessionID,
-                  )
+                  const liveJobs = isCoordinator
+                    ? (yield* background.list()).filter(
+                        (j) => j.type === "task" && j.metadata?.parentSessionId === sessionID,
+                      )
+                    : []
                   const liveRunning = liveJobs.filter((j) => j.status === "running")
 
-                  const taskGraph = yield* engagement.getTaskGraph()
+                  const taskGraph = isCoordinator ? yield* engagement.getTaskGraph() : {}
                   const taskEntries = Object.values(taskGraph)
                   if (taskEntries.length > 0) {
                     const counts = TaskGraph.statusSummary(taskGraph)
@@ -1409,6 +1448,19 @@ const layer = Layer.effect(
                     }
                     if (ready.length > 0) {
                       lines.push(`  Ready to dispatch: ${ready.map((t) => t.id).join(", ")}`)
+                    }
+                    // AR1 wake-time advance nudge. Keyed off REAL liveness
+                    // (background registry), not graph status, so it fires even if
+                    // a completion inject was missed: whenever the coordinator takes
+                    // any turn with nothing actually running and a wave ready, it is
+                    // told to launch it. Advancement no longer depends on every
+                    // per-completion inject landing.
+                    if (flags.experimentalOrchestrator && liveRunning.length === 0 && ready.length > 0) {
+                      lines.push(
+                        `  ⚡ WAVE READY — no subagent is running and ${ready.length} task(s) are ready (${ready
+                          .map((t) => t.id)
+                          .join(", ")}). Call task_graph plan with NO new tasks NOW to launch this wave. Do not poll or wait.`,
+                      )
                     }
                     lines.push("</task-graph>")
                   }
@@ -1468,17 +1520,19 @@ const layer = Layer.effect(
                   lines.push("")
                   lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.")
 
+                  // Slash-command tips are user-facing — only the coordinator
+                  // talks to the user, so subagents don't need them (QW2).
                   const cmdHints: string[] = []
                   const hostCount = Object.keys(state.hosts).length
                   const vulnCount = Object.values(state.hosts).reduce((sum, h) => sum + h.vulns.length, 0)
                   const credCount = Object.keys(state.credentials).length
-                  if (step <= 2 && hostCount === 0) {
+                  if (isCoordinator && step <= 2 && hostCount === 0) {
                     cmdHints.push("Tip for user: /scope to set targets, /mode to choose execution style")
                   }
-                  if (vulnCount > 0 && vulnCount <= 3) {
+                  if (isCoordinator && vulnCount > 0 && vulnCount <= 3) {
                     cmdHints.push("Tip for user: /vulns shows all findings, /report generates a report")
                   }
-                  if (credCount > 0 && credCount <= 2) {
+                  if (isCoordinator && credCount > 0 && credCount <= 2) {
                     cmdHints.push("Tip for user: /creds shows all captured credentials")
                   }
                   if (cmdHints.length > 0) {
@@ -1487,6 +1541,14 @@ const layer = Layer.effect(
                     lines.push("When relevant, naturally mention these commands to the user:")
                     for (const h of cmdHints) lines.push(`  ${h}`)
                     lines.push("</command-hints>")
+                  }
+
+                  // Resolved-vectors ledger (R6 fix) — injected for BOTH coordinator
+                  // and subagents so no agent re-opens a dead vector cross-session.
+                  const resolvedVectorsCtx = EngagementSchema.toResolvedVectorsContext(state)
+                  if (resolvedVectorsCtx) {
+                    lines.push("")
+                    lines.push(resolvedVectorsCtx)
                   }
 
                   // Wordlist usage context
@@ -1511,14 +1573,34 @@ const layer = Layer.effect(
                   if (state.mode === "auto" && agent.name === "pentest") {
                     lines.push("", ORCHESTRATOR_MODE)
                   }
+
+                  // AR1: when the deterministic orchestrator is enabled, `plan` is
+                  // the single orchestration verb — the harness runs dispatch,
+                  // collection, and status. Only the coordinator plans.
+                  if (flags.experimentalOrchestrator && isCoordinator) {
+                    lines.push(
+                      "",
+                      "<orchestrator-dag>",
+                      "Deterministic orchestrator is ON. `task_graph plan` is your ONLY orchestration verb.",
+                      "- Emit objectives once: {tasks:[{id, description, assignedAgent, target?, technique?, dependsOn?}]}. The harness immediately dispatches the ready wave (deps satisfied) up to the concurrency cap and runs every subagent in the background.",
+                      "- Do NOT call task_graph dispatch/complete/status/list_ready and do NOT spawn subagents by hand with the task tool — the harness owns dispatch, result collection, and status. Do NOT poll.",
+                      "- You are notified as each subagent finishes. When a wave completes you'll see the next ready set: call `plan` with NO new tasks to launch it as-is, or `plan` with new/changed objectives to adapt based on what the finished wave found.",
+                      "- Every strategic decision stays yours: what to plan, whether to launch the next wave, and whether the engagement is done. A wave finishing is NOT completion — judge that against objectives and coverage, and do not stop early.",
+                      "- Vectors already settled appear in <resolved-vectors>; the harness will not re-dispatch a resolved dead end.",
+                      "- Two ways to drop a subagent (both affect only that one, never siblings): task_graph abandon = de-track but LET IT FINISH (use when it merely LOOKS redundant — it may still succeed, and its result is still reported); task_graph kill = HARD-STOP now and reclaim tokens (use only when you're sure it's stuck/looping/wrong — killing loses whatever it might still produce). When unsure, prefer abandon.",
+                      "</orchestrator-dag>",
+                    )
+                  }
                   return lines.join("\n")
                 } catch {
                   return undefined
                 }
               }),
             ])
+            // Static prefix only — the volatile engagement state is passed
+            // separately as `volatileSystem` so this block stays cacheable
+            // across turns (see redesign QW1). Ordered most-stable first.
             const system = [
-              ...(engagementCtx ? [engagementCtx] : []),
               ...env,
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
@@ -1533,6 +1615,7 @@ const layer = Layer.effect(
               sessionID,
               parentSessionID: session.parentID,
               system,
+              volatileSystem: engagementCtx,
               messages: [
                 ...modelMsgs,
                 ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),

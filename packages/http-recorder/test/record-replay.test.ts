@@ -135,7 +135,10 @@ describe("http-recorder", () => {
               method: "POST",
               url: "https://example.test/path?key=sk-123456789012345678901234",
               headers: {},
-              body: JSON.stringify({ nested: "AIzaSyDHibiBRvJZLsFnPYPoiTwxY4ztQ55yqCE" }),
+              // Fake Google-API-key-SHAPED value, built at runtime so no literal
+              // secret sits in source (GitHub secret scanning flags any literal
+              // AIza… string). Only needs to match /AIza[0-9A-Za-z_-]{20,}/.
+              body: JSON.stringify({ nested: "AIza" + "b".repeat(35) }),
             },
             response: {
               status: 200,

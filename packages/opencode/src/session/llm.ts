@@ -4,7 +4,7 @@ import { PermissionV1 } from "@pentestcode/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { SessionV1 } from "@pentestcode/core/v1/session"
 import { serviceUse } from "@pentestcode/core/effect/service-use"
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Deferred, Semaphore } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool } from "ai"
 import type { LLMEvent } from "@pentestcode/llm"
@@ -40,6 +40,13 @@ export type StreamInput = {
   agent: Agent.Info
   permission?: PermissionV1.Ruleset
   system: string[]
+  /**
+   * Volatile, per-turn system context (e.g. engagement state). Kept separate
+   * from `system` so it can be lowered as its own trailing system block: the
+   * large static prefix (base prompt + skills + refs) then stays a stable,
+   * cacheable prefix across turns instead of being invalidated every turn.
+   */
+  volatileSystem?: string
   messages: ModelMessage[]
   small?: boolean
   tools: Record<string, Tool>
@@ -81,6 +88,38 @@ const live: Layer.Layer<
     const events = yield* EventV2Bridge.Service
     const llmClient = yield* LLMClient.Service
     const flags = yield* RuntimeFlags.Service
+
+    // Per-provider outbound-concurrency limiter. All LLM streams (coordinator,
+    // subagents, small-model offload/title) funnel through `stream`, so capping
+    // here prevents a fan-out from saturating the provider into 429/529.
+    // TWO independent pools per provider so a big stream's NESTED small-model
+    // call (made mid-stream, while the big stream still holds its permit) draws
+    // from a different pool — a single shared pool would deadlock under nesting.
+    const bigMax = flags.llmMaxConcurrency ?? 4
+    const smallMax = Math.max(1, Math.floor(bigMax / 2))
+    const bigSemaphores = new Map<string, Semaphore.Semaphore>()
+    const smallSemaphores = new Map<string, Semaphore.Semaphore>()
+    const semaphoreFor = (providerID: string, small: boolean) => {
+      const map = small ? smallSemaphores : bigSemaphores
+      let sem = map.get(providerID)
+      if (!sem) {
+        sem = Semaphore.makeUnsafe(small ? smallMax : bigMax)
+        map.set(providerID, sem)
+      }
+      return sem
+    }
+    // Hold one permit for the LIFETIME of the current stream scope: fork a holder
+    // that acquires, signals, then parks; scope close interrupts it → permit
+    // released. Blocks until the permit is actually held (backpressure).
+    const acquireSlotScoped = (providerID: string, small: boolean) =>
+      Effect.gen(function* () {
+        const sem = semaphoreFor(providerID, small)
+        const acquired = yield* Deferred.make<void>()
+        yield* sem
+          .withPermits(1)(Deferred.succeed(acquired, undefined).pipe(Effect.andThen(Effect.never)))
+          .pipe(Effect.forkScoped)
+        yield* Deferred.await(acquired)
+      })
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
       yield* Effect.logInfo("stream", {
@@ -358,6 +397,10 @@ const live: Layer.Layer<
       Stream.scoped(
         Stream.unwrap(
           Effect.gen(function* () {
+            // Provider-concurrency gate — held for the stream's lifetime (see
+            // acquireSlotScoped). Small-model streams draw from the small pool.
+            yield* acquireSlotScoped(input.model.providerID, input.small ?? false)
+
             const ctrl = yield* Effect.acquireRelease(
               Effect.sync(() => new AbortController()),
               (ctrl) => Effect.sync(() => ctrl.abort()),
