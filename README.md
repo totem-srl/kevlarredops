@@ -19,7 +19,7 @@
 
 PentestCode is an AI pentesting agent that runs tools, analyzes results, and makes decisions in your terminal. Hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT), rebuilt for offensive security.
 
-> **Alpha** — works on real engagements and CTFs, but expect rough edges. [Open an issue](https://github.com/s0ld13rr/pentestcode/issues) if something breaks.
+> **Beta** — works on real engagements and CTFs, but expect rough edges. [Open an issue](https://github.com/s0ld13rr/pentestcode/issues) if something breaks.
 
 ## What It Actually Does
 
