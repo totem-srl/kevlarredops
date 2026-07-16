@@ -320,6 +320,20 @@ export const VectorStatus = Schema.Literals([
 ])
 export type VectorStatus = typeof VectorStatus.Type
 
+// A single sub-attempt WITHIN a vector — the specific technique tried during a grind.
+// This is the in-vector memory: a hard exploit (deser gadget chains, payload variations,
+// shell-stabilization tricks) burns many attempts before the vector as a whole settles.
+// Logging each one means a re-spawn / post-compaction turn does not re-explore blind.
+export const VectorAttempt = Schema.Struct({
+  technique: Schema.String, // the specific approach, e.g. "gadget CommonsCollections6", "hessian2 base64 encoding"
+  outcome: Schema.Literals(["failed", "partial", "success"]),
+  detail: Schema.optional(Schema.String), // short reason/result, e.g. "ClassNotFound on target classpath"
+  timestamp: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.VectorAttempt" })
+export type VectorAttempt = typeof VectorAttempt.Type
+
+export const VECTOR_ATTEMPT_LOG_MAX = 20 // per-vector cap on sub-attempt history
+
 export const ResolvedVector = Schema.Struct({
   id: Schema.String,
   timestamp: Schema.String,
@@ -330,6 +344,7 @@ export const ResolvedVector = Schema.Struct({
   attempts: Schema.optional(Schema.Number), // how many times it has been probed
   evidence: Schema.optional(Schema.String), // short reason it is settled (why dead / why blocked)
   revisit_when: Schema.optional(Schema.String), // for "blocked": the precondition to wait on
+  attempt_log: Schema.optional(Schema.Array(VectorAttempt)), // in-vector memory: per-technique sub-attempts
 }).annotate({ identifier: "Engagement.ResolvedVector" })
 export type ResolvedVector = typeof ResolvedVector.Type
 
@@ -635,6 +650,14 @@ export function toResolvedVectorsContext(state: State, max = 40): string | undef
     const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
     const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
     lines.push(`  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${why}`)
+    // For vectors still in progress, surface the techniques already tried so a
+    // re-spawn / post-compaction turn does not repeat the same dead-end sub-attempts.
+    if (v.status === "attempted" || v.status === "blocked") {
+      const failed = (v.attempt_log ?? []).filter((a) => a.outcome === "failed").slice(-6)
+      for (const a of failed) {
+        lines.push(`      ✗ tried: ${a.technique}${a.detail ? ` — ${a.detail}` : ""} (don't repeat)`)
+      }
+    }
   }
   if (sorted.length > shown.length) lines.push(`  … +${sorted.length - shown.length} more (state_query resolved_vectors)`)
   lines.push("</resolved-vectors>")

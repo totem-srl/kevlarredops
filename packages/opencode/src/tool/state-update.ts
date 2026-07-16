@@ -815,6 +815,22 @@ export const StateUpdateTool = Tool.define(
                   output: "Error: data.target (host:port/URL), data.vector (technique), and data.status (attempted|confirmed|resolved|blocked) are required for record_vector.",
                 }
               }
+              // Optional in-vector sub-attempt: log the specific technique tried
+              // (gadget chain, encoding, payload variant) so a re-spawn / post-compaction
+              // turn does not re-explore the same dead ends within a hard grind.
+              const attemptRaw = d.attempt as Record<string, unknown> | undefined
+              const attempt_log = attemptRaw?.technique
+                ? [
+                    {
+                      technique: attemptRaw.technique as string,
+                      outcome: (["failed", "partial", "success"].includes(attemptRaw.outcome as string)
+                        ? attemptRaw.outcome
+                        : "failed") as EngagementSchema.VectorAttempt["outcome"],
+                      detail: attemptRaw.detail as string | undefined,
+                      timestamp: new Date().toISOString(),
+                    },
+                  ]
+                : undefined
               const rec = {
                 id: (d.id as string) || `vec-${Date.now()}`,
                 timestamp: new Date().toISOString(),
@@ -825,14 +841,16 @@ export const StateUpdateTool = Tool.define(
                 attempts: d.attempts as number | undefined,
                 evidence: d.evidence as string | undefined,
                 revisit_when: d.revisit_when as string | undefined,
+                attempt_log,
               }
               const { created } = yield* store.addResolvedVector(rec)
               const updated = yield* store.get()
               if (updated) yield* store.save(updated)
+              const attemptNote = attempt_log ? ` | logged attempt: ${attempt_log[0]!.technique} (${attempt_log[0]!.outcome})` : ""
               return {
                 title: `Vector: ${status}`,
                 metadata: { target, status, created },
-                output: `Vector ${created ? "recorded" : "updated (re-probe)"} [${status.toUpperCase()}]: ${target} :: ${vector}${status === "resolved" || status === "confirmed" ? " — will not be re-tested" : ""}`,
+                output: `Vector ${created ? "recorded" : "updated (re-probe)"} [${status.toUpperCase()}]: ${target} :: ${vector}${status === "resolved" || status === "confirmed" ? " — will not be re-tested" : ""}${attemptNote}`,
               }
             }
 
