@@ -647,19 +647,38 @@ export function decisionSummary(decisions: Decision[]): {
 // so no agent re-opens a dead end. `resolved`/`confirmed` are hard "don't retest";
 // `blocked` lists the precondition; `attempted` is advisory (retry only with a new
 // technique). Kept small — this rides in every turn's context for every role.
-export function toResolvedVectorsContext(state: State, max = 40): string | undefined {
-  const vectors = state.resolved_vectors ?? []
+// NEW-1: this block is injected EVERY turn for both roles and was the single
+// heaviest volatile block on a real engagement (~3.5k tok, 62 vectors) — the
+// verbose per-vector evidence strings dominated. Keep the anti-re-test guarantee
+// but bound the cost: (a) drop CONFIRMED vectors — those are successes already
+// recorded as vulnerabilities, not dead ends to avoid; (b) clip evidence/revisit
+// text; (c) tighter cap. Everything (incl. confirmed + full evidence) stays in
+// `state_query resolved_vectors`.
+export function toResolvedVectorsContext(state: State, max = 30): string | undefined {
+  const all = state.resolved_vectors ?? []
+  if (all.length === 0) return undefined
+  const vectors = all.filter((v) => v.status !== "confirmed")
   if (vectors.length === 0) return undefined
-  const rank: Record<string, number> = { resolved: 0, blocked: 1, confirmed: 2, attempted: 3 }
+  const rank: Record<string, number> = { resolved: 0, blocked: 1, attempted: 2 }
   const sorted = [...vectors].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
   const shown = sorted.slice(0, max)
-  const lines = ["<resolved-vectors>", "Vectors already settled — DO NOT re-test resolved/confirmed; honor blocked preconditions:"]
+  const clip = (s: string) => (s.length > 90 ? s.slice(0, 90) + "…" : s)
+  const lines = [
+    "<resolved-vectors>",
+    "Settled vectors — do NOT re-test RESOLVED, honor BLOCKED preconditions, retry ATTEMPTED only with a genuinely new technique:",
+  ]
   for (const v of shown) {
     const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
-    const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
+    const why =
+      v.status === "blocked" && v.revisit_when
+        ? ` (revisit: ${clip(v.revisit_when)})`
+        : v.evidence
+          ? ` — ${clip(v.evidence)}`
+          : ""
     lines.push(`  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${why}`)
   }
-  if (sorted.length > shown.length) lines.push(`  … +${sorted.length - shown.length} more (state_query resolved_vectors)`)
+  const hidden = all.length - shown.length
+  if (hidden > 0) lines.push(`  … +${hidden} more (incl. confirmed) — state_query resolved_vectors`)
   lines.push("</resolved-vectors>")
   return lines.join("\n")
 }

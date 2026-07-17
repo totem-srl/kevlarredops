@@ -86,4 +86,38 @@ describe("toResolvedVectorsContext", () => {
     expect(ctx).toContain("x3")
     expect(ctx).toContain("revisit: need creds")
   })
+
+  test("NEW-1: excludes CONFIRMED from the block but counts them in the overflow", () => {
+    const state: EngagementSchema.State = {
+      ...baseState(),
+      resolved_vectors: [
+        vector({ id: "c", vector: "sqli-confirmed", status: "confirmed" }),
+        vector({ id: "r", vector: "dead-end", status: "resolved" }),
+      ],
+    }
+    const ctx = EngagementSchema.toResolvedVectorsContext(state)!
+    expect(ctx).toContain("[RESOLVED]")
+    expect(ctx).not.toContain("[CONFIRMED]")
+    expect(ctx).not.toContain("sqli-confirmed")
+    expect(ctx).toContain("+1 more") // the confirmed one is still accounted for
+  })
+
+  test("NEW-1: returns undefined when only confirmed vectors exist", () => {
+    const state: EngagementSchema.State = {
+      ...baseState(),
+      resolved_vectors: [vector({ status: "confirmed" }), vector({ id: "c2", status: "confirmed" })],
+    }
+    expect(EngagementSchema.toResolvedVectorsContext(state)).toBeUndefined()
+  })
+
+  test("NEW-1: clips long evidence in the block", () => {
+    const long = "x".repeat(300)
+    const state: EngagementSchema.State = {
+      ...baseState(),
+      resolved_vectors: [vector({ status: "resolved", evidence: long })],
+    }
+    const ctx = EngagementSchema.toResolvedVectorsContext(state)!
+    expect(ctx).toContain("…")
+    expect(ctx).not.toContain(long) // full evidence is not inlined
+  })
 })
