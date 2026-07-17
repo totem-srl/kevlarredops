@@ -23,7 +23,7 @@ import { ProviderV2 } from "@pentestcode/core/provider"
 import { ModelV2 } from "@pentestcode/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { SUMMARIZE_THRESHOLD, OUTPUT_HARD_CAP, type Summarizer } from "./small-model"
+import { SUMMARIZE_THRESHOLD, shouldCapOutput, buildCappedOutput, type Summarizer } from "./small-model"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -165,25 +165,16 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             // is still large AND the tool did not already summarize/truncate/ref it,
             // cap the transcript copy and keep the full text retrievable by ref.
             // Parsers also persist full results to engagement state (state_query).
-            if (
-              typeof processed.output === "string" &&
-              processed.output.length > OUTPUT_HARD_CAP &&
-              !(isRecord(processed.metadata) && processed.metadata.summarized === true) &&
-              !(isRecord(processed.metadata) && processed.metadata.truncated === true) &&
-              !(isRecord(processed.metadata) && typeof processed.metadata.outputPath === "string")
-            ) {
+            if (shouldCapOutput(processed.output, processed.metadata)) {
               const raw = processed.output
               const ref = yield* truncate.write(raw).pipe(Effect.catch(() => Effect.succeed(undefined)))
+              const capped = buildCappedOutput(raw, ref)
               processed = {
                 ...processed,
-                output: `${raw.slice(0, OUTPUT_HARD_CAP)}\n\n[Output truncated: ${raw.length} bytes total, showing the first ${OUTPUT_HARD_CAP}.${
-                  ref ? ` Full output saved to ${ref} — read it for exact detail.` : ""
-                } Parser tools also write full results to engagement state — use state_query.]`,
+                output: capped.output,
                 metadata: {
                   ...(isRecord(processed.metadata) ? processed.metadata : {}),
-                  truncated: true,
-                  original_bytes: raw.length,
-                  ...(ref ? { outputPath: ref } : {}),
+                  ...capped.metadataPatch,
                 },
               }
             }

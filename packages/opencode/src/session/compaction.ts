@@ -32,6 +32,54 @@ const TOOL_OUTPUT_MAX_CHARS = 2_000
 const PRUNE_PROTECTED_TOOLS = ["skill"]
 const DEFAULT_TAIL_TURNS = 2
 const MIN_PRESERVE_RECENT_TOKENS = 2_000
+
+// A-5 (pure, tested): choose which completed tool-result parts are cold enough to
+// prune-to-ref. DEPTH-PROTECTION invariants — the guard against a compaction
+// regression eating the active vector:
+//   - never touch the most recent `protectTurns` turns (walking back from the tail);
+//   - never touch a PROTECTED tool (e.g. `skill` — the loaded methodology body);
+//   - keep the most-recent `protectTokens` worth of tool output verbatim;
+//   - stop at a summary boundary or an already-compacted part (don't cross it).
+// Returns the parts to prune plus token totals. No I/O — the caller writes refs.
+export function selectPrunableParts(
+  msgs: readonly SessionV1.WithParts[],
+  opts: {
+    protectTokens?: number
+    protectTurns?: number
+    protectedTools?: readonly string[]
+    estimate?: (output: unknown) => number
+  } = {},
+): { toPrune: SessionV1.ToolPart[]; prunedTokens: number; scannedTokens: number } {
+  const protectTokens = opts.protectTokens ?? PRUNE_PROTECT
+  const protectTurns = opts.protectTurns ?? DEFAULT_TAIL_TURNS
+  const protectedTools = opts.protectedTools ?? PRUNE_PROTECTED_TOOLS
+  const estimate = opts.estimate ?? ((o: unknown) => Token.estimate(o as string))
+
+  let total = 0
+  let pruned = 0
+  const toPrune: SessionV1.ToolPart[] = []
+  let turns = 0
+
+  loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
+    const msg = msgs[msgIndex]!
+    if (msg.info.role === "user") turns++
+    if (turns < protectTurns) continue
+    if (msg.info.role === "assistant" && msg.info.summary) break loop
+    for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = msg.parts[partIndex]!
+      if (part.type !== "tool") continue
+      if (part.state.status !== "completed") continue
+      if (protectedTools.includes(part.tool)) continue
+      if (part.state.time.compacted) break loop
+      const est = estimate(part.state.output)
+      total += est
+      if (total <= protectTokens) continue
+      pruned += est
+      toPrune.push(part)
+    }
+  }
+  return { toPrune, prunedTokens: pruned, scannedTokens: total }
+}
 const MAX_PRESERVE_RECENT_TOKENS = 8_000
 type Turn = {
   start: number
@@ -252,29 +300,7 @@ const layer = Layer.effect(
         .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
       if (!msgs) return
 
-      let total = 0
-      let pruned = 0
-      const toPrune: SessionV1.ToolPart[] = []
-      let turns = 0
-
-      loop: for (let msgIndex = msgs.length - 1; msgIndex >= 0; msgIndex--) {
-        const msg = msgs[msgIndex]
-        if (msg.info.role === "user") turns++
-        if (turns < 2) continue
-        if (msg.info.role === "assistant" && msg.info.summary) break loop
-        for (let partIndex = msg.parts.length - 1; partIndex >= 0; partIndex--) {
-          const part = msg.parts[partIndex]
-          if (part.type !== "tool") continue
-          if (part.state.status !== "completed") continue
-          if (PRUNE_PROTECTED_TOOLS.includes(part.tool)) continue
-          if (part.state.time.compacted) break loop
-          const estimate = Token.estimate(part.state.output)
-          total += estimate
-          if (total <= PRUNE_PROTECT) continue
-          pruned += estimate
-          toPrune.push(part)
-        }
-      }
+      const { toPrune, prunedTokens: pruned, scannedTokens: total } = selectPrunableParts(msgs)
 
       yield* Effect.logInfo("found", { pruned, total })
       if (pruned > PRUNE_MINIMUM) {
