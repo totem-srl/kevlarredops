@@ -1392,17 +1392,23 @@ const layer = Layer.effect(
                   if (transitionHint) lines.push("", transitionHint)
 
                   let recentChanges: EngagementSchema.ChangelogEntry[] = []
+                  let diffShown = false
                   const lastTs = yield* engagement.getLastInjectedTimestamp()
                   if (lastTs) {
                     recentChanges = yield* engagement.getChangelogSince(lastTs)
                     const diff = EngagementSchema.toDiffContext(recentChanges)
                     if (diff) {
                       lines.push("", diff)
+                      diffShown = true
                     }
                   }
                   yield* engagement.markInjected()
 
-                  lines.push("", EngagementSchema.toOODAContext(state, recentChanges))
+                  // C-1 dedup: the diff block above already lists the mutations since
+                  // last turn. Don't also print OODA's "Recent changes" rollup of the
+                  // same set — pass [] so OODA skips it. Coverage/gaps/alerts/sessions/
+                  // segments/tasks/objectives (the unique OODA signal) are still shown.
+                  lines.push("", EngagementSchema.toOODAContext(state, diffShown ? [] : recentChanges))
 
                   const shouldInjectFull = step <= 1 || step % 8 === 0 || recentChanges.length > 15
                   if (shouldInjectFull) {
@@ -1507,14 +1513,15 @@ const layer = Layer.effect(
                     lines.push("</decision-history>")
                   }
 
+                  // C-1 dedup: only the dynamic trigger (which findings need review)
+                  // stays in the volatile block; the static "how to run a critic"
+                  // instruction moved to the cached prefix (<critic-protocol> below).
                   const criticReminder = EngagementSchema.criticHint(state)
                   if (criticReminder) {
                     lines.push("")
                     lines.push("<auto-critic>")
                     lines.push(criticReminder)
-                    lines.push("Use the task tool to spawn a critic subagent: agent_type=critic, provide the vuln IDs and host IPs to validate.")
-                    lines.push("Critic is READ-ONLY. It will return a verdict (CONFIRMED/FALSE_POSITIVE/NEEDS_MORE_EVIDENCE/DOWNGRADE/UPGRADE).")
-                    lines.push("After receiving the critic's verdict, update vuln status and confidence with state_update update_vuln.")
+                    lines.push("Validate these per the <critic-protocol> in the system prompt.")
                     lines.push("</auto-critic>")
                   }
 
@@ -1572,6 +1579,10 @@ const layer = Layer.effect(
                   // was cache-WRITTEN every turn — the opposite of the static/volatile split.
                   const staticLines: string[] = [
                     "REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.",
+                    "",
+                    "<critic-protocol>",
+                    "When <auto-critic> lists unvalidated findings: spawn a critic subagent (task tool, agent_type=critic) with the vuln IDs + host IPs. Critic is READ-ONLY and returns a verdict (CONFIRMED/FALSE_POSITIVE/NEEDS_MORE_EVIDENCE/DOWNGRADE/UPGRADE). After the verdict, update status + confidence via state_update update_vuln.",
+                    "</critic-protocol>",
                   ]
                   if (modeDirective) staticLines.push("", modeDirective)
 
