@@ -34,6 +34,15 @@ export const MAX_DIGEST_INPUT = 16000
 // is already compact and the agent needs it verbatim.
 export const SUMMARIZE_TOOLS = new Set(["bash"])
 
+// Universal backstop cap (C-4). AR2 offload only covers `bash` and only when a
+// small model is configured; every other large output (a parser dumping a big
+// /24 scan, state_query, or bash with no small model) previously rode the
+// expensive transcript verbatim. Any tool output above this that the tool did
+// NOT already summarize/truncate/ref is capped at the result boundary, with the
+// full text kept retrievable by ref. Set above SUMMARIZE_THRESHOLD so the
+// cheap-model digest (better than a blunt cut) always takes precedence for bash.
+export const OUTPUT_HARD_CAP = 16000
+
 const SYSTEM = `You are a compression worker for a penetration-testing agent. You receive the raw stdout/stderr of a shell command (nmap, nuclei, gobuster, netexec, curl, cat, etc.). Produce a DENSE, factual digest that keeps everything the strategist needs and drops the rest.
 
 KEEP (verbatim, never mask or omit):
