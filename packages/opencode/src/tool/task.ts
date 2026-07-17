@@ -47,6 +47,12 @@ const BACKGROUND_UPDATED = "Context sent to the running background task — you'
 const CONTEXT_PROTOCOL = [
   "<context-protocol>",
   "Your engagement state (hosts, confirmed vulns, credentials, already-tested vectors) is shared and visible to you. Before acting, query it with state_query. Do NOT re-test or re-report anything already confirmed in state, and do NOT expect findings/creds/tokens to be pasted into this prompt — pull them yourself. Record every new finding immediately via state_update / the parser tools.",
+  "END your FINAL message with this machine-read result block so your work is filed accurately for the coordinator and later agents (this is parsed verbatim — do not rely on prose being interpreted):",
+  "<agent-result>",
+  "findings: confirmed facts you established — vulns/creds/access/live hosts+services; one per '|', or 'none'",
+  "dead_ends: vectors you tried that did NOT work (so no one retries them); one per '|', or 'none'",
+  "next: concrete recommended next steps; one per '|', or 'none'",
+  "</agent-result>",
   "</context-protocol>",
 ].join("\n")
 
@@ -88,6 +94,39 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+// I-1: parse the machine-read <agent-result> trailer that CONTEXT_PROTOCOL asks
+// every subagent to emit. This replaces guessing findings/failures from prose by
+// substring match (which silently misfiled a real finding as a "failure"). Returns
+// undefined when no trailer is present, so the legacy heuristic still runs —
+// graceful degradation for non-compliant / older output.
+export function parseResultTrailer(
+  text: string,
+): { findings: string[]; failures: string[]; next: string[] } | undefined {
+  const blocks = text.match(/<agent-result>([\s\S]*?)<\/agent-result>/gi)
+  if (!blocks || blocks.length === 0) return undefined
+  const body = blocks[blocks.length - 1]!.replace(/<\/?agent-result>/gi, "")
+  const pick = (labels: string[]): string[] => {
+    for (const line of body.split("\n")) {
+      const m = line.match(/^\s*([a-z_ ]+):\s*(.*)$/i)
+      if (!m) continue
+      const key = m[1]!.trim().toLowerCase().replace(/\s+/g, "_")
+      if (!labels.includes(key)) continue
+      return m[2]!
+        .split("|")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.toLowerCase() !== "none")
+        .map((s) => s.slice(0, 200))
+        .slice(0, 10)
+    }
+    return []
+  }
+  return {
+    findings: pick(["findings", "finding"]),
+    failures: pick(["dead_ends", "dead_end", "failures", "failed", "failed_attempts"]),
+    next: pick(["next", "recommended", "recommended_next", "next_steps"]),
+  }
+}
+
 function buildContextSummary(
   params: { description: string; subagent_type: string },
   sessionID: string,
@@ -98,34 +137,43 @@ function buildContextSummary(
   const failures: string[] = []
   const next: string[] = []
 
-  for (const line of text.split("\n")) {
-    const lower = line.toLowerCase().trim()
-    if (!lower) continue
-    if (
-      lower.includes("found") ||
-      lower.includes("discovered") ||
-      lower.includes("identified") ||
-      lower.includes("confirmed")
-    ) {
-      findings.push(line.trim().slice(0, 200))
-    } else if (
-      lower.includes("failed") ||
-      lower.includes("error") ||
-      lower.includes("denied") ||
-      lower.includes("timeout")
-    ) {
-      failures.push(line.trim().slice(0, 200))
-    } else if (
-      lower.includes("recommend") ||
-      lower.includes("next") ||
-      lower.includes("should") ||
-      lower.includes("suggest")
-    ) {
-      next.push(line.trim().slice(0, 200))
+  const parsed = parseResultTrailer(text)
+  if (parsed) {
+    // Trailer present — trust the subagent's own typed classification.
+    findings.push(...parsed.findings)
+    failures.push(...parsed.failures)
+    next.push(...parsed.next)
+  } else {
+    // No trailer — fall back to the legacy prose heuristic.
+    for (const line of text.split("\n")) {
+      const lower = line.toLowerCase().trim()
+      if (!lower) continue
+      if (
+        lower.includes("found") ||
+        lower.includes("discovered") ||
+        lower.includes("identified") ||
+        lower.includes("confirmed")
+      ) {
+        findings.push(line.trim().slice(0, 200))
+      } else if (
+        lower.includes("failed") ||
+        lower.includes("error") ||
+        lower.includes("denied") ||
+        lower.includes("timeout")
+      ) {
+        failures.push(line.trim().slice(0, 200))
+      } else if (
+        lower.includes("recommend") ||
+        lower.includes("next") ||
+        lower.includes("should") ||
+        lower.includes("suggest")
+      ) {
+        next.push(line.trim().slice(0, 200))
+      }
     }
   }
 
-  // Fall back to truncation if no heuristic matches
+  // Guarantee some carried context even if everything came back empty.
   if (findings.length === 0 && failures.length === 0 && next.length === 0) {
     findings.push(text.slice(0, 500))
   }
