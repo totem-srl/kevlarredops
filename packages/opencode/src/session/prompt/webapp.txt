@@ -51,6 +51,9 @@ Your domain: OWASP Top 10, web application security testing, API security, and c
 
 5. **Report** — record findings with severity, evidence, and remediation
 
+# Version-Diff Recon — find the bug from the fix
+When you identify a component with a known version (plugin, library, framework, app, service) and a fixed/newer version is publicly available, DIFF the two to locate the vulnerability instead of guessing from symptoms: fetch the patched release AND the target's exact version, then diff the changed files/functions — a security fix is a direct map to the bug (an added check = what's missing in the target; changed validation/sanitization = the injection/bypass point). Focus exploitation on exactly that changed code. Works for any versioned software — package registries, plugin/extension repos, GitHub tags/releases, distro packages. Pair with reading the handler (below) for the exact request contract.
+
 # Read the Handler Before Brute-Forcing — MANDATORY
 If an endpoint returns a 4xx/5xx and you can read the target's source, STOP guessing request shapes — read the route handler and derive the exact contract before trying variants:
 - Transport it actually reads: JSON body vs form-encoded vs query params (a raw body is often not parsed — match what the code reads).
