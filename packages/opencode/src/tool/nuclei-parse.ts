@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { PentestEvent } from "@pentestcode/schema/pentest-event"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -211,7 +212,20 @@ export const NucleiParseTool = Tool.define(
                 .filter(Boolean)
                 .join(" | ")
 
-              const conf = f.severity === "info" ? 0.5 : 0.8
+              // I-3: nuclei is a scanner — a template match is UNVERIFIED until a
+              // critic/manual check confirms it. Do not fabricate "verified" from
+              // severity, and derive confidence from real signal, not severity.
+              const evidenceItem = {
+                tool: "nuclei",
+                command: `nuclei -t ${f.templateId}`,
+                output: evidence,
+                timestamp: new Date().toISOString(),
+                reasoning: `Template ${f.templateId} matched at ${f.matchedAt || "target"}`,
+                source_agent: "scanner",
+                attempt_number: 1,
+                verification_status: "unverified" as const,
+              }
+              const conf = EngagementSchema.deriveConfidence({ status: "confirmed", evidence_items: [evidenceItem] })
               yield* store.addVuln(f.ip, {
                 id: f.vulnId,
                 title: f.title,
@@ -220,17 +234,7 @@ export const NucleiParseTool = Tool.define(
                 confidence: conf,
                 description: `Nuclei ${f.scanType} scan finding. Tags: ${f.tags.join(", ") || "none"}`,
                 evidence,
-                evidence_items: [{
-                  tool: "nuclei",
-                  command: `nuclei -t ${f.templateId}`,
-                  output: evidence,
-                  timestamp: new Date().toISOString(),
-                  confidence: conf,
-                  reasoning: `Template ${f.templateId} matched at ${f.matchedAt || "target"}`,
-                  source_agent: "scanner",
-                  attempt_number: 1,
-                  verification_status: f.severity === "info" ? "unverified" : "verified",
-                }],
+                evidence_items: [{ ...evidenceItem, confidence: conf }],
                 service_port: f.port || undefined,
                 references: f.references,
               })

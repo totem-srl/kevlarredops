@@ -68,6 +68,29 @@ export const EvidenceItem = Schema.Struct({
 }).annotate({ identifier: "Engagement.EvidenceItem" })
 export type EvidenceItem = typeof EvidenceItem.Type
 
+// I-3: derive a vulnerability's confidence from real signal — corroboration
+// (independent tools agreeing, repeated observation) and exploitation state —
+// NOT from severity (severity is impact, not likelihood-of-being-real) and NOT a
+// hardcoded literal. A critic/manual verification dominates when present. Keep
+// this the single source of a vuln's confidence so the number means something and
+// the auto-critic (which gates on confidence) reacts to evidence, not a guess.
+export function deriveConfidence(vuln: {
+  status?: string
+  evidence_items?: ReadonlyArray<{ tool?: string; verification_status?: string }>
+}): number {
+  const items = vuln.evidence_items ?? []
+  if (items.some((e) => e.verification_status === "verified")) return 0.95
+  if (items.length > 0 && items.every((e) => e.verification_status === "false_positive")) return 0.1
+  let c = 0.5 // one unverified signal
+  const tools = new Set(items.map((e) => e.tool).filter(Boolean))
+  if (tools.size >= 2) c += 0.2 // independent tools corroborate
+  else if (items.length >= 2) c += 0.1 // repeated observation, same tool
+  if (vuln.status === "exploited") c += 0.25
+  else if (vuln.status === "confirmed") c += 0.1
+  else if (vuln.status === "suspected") c -= 0.15
+  return Math.round(Math.max(0.1, Math.min(0.95, c)) * 100) / 100
+}
+
 export const Vulnerability = Schema.Struct({
   id: Schema.optional(Schema.String),
   title: Schema.String,
