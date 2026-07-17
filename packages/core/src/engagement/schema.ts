@@ -665,7 +665,10 @@ export function toResolvedVectorsContext(state: State, max = 30): string | undef
   const clip = (s: string) => (s.length > 90 ? s.slice(0, 90) + "…" : s)
   const lines = [
     "<resolved-vectors>",
-    "Settled vectors — do NOT re-test RESOLVED, honor BLOCKED preconditions, retry ATTEMPTED only with a genuinely new technique:",
+    // NEW-2: license informed re-testing. The ledger kills BLIND repetition, not
+    // evidence-driven reconsideration — a RESOLVED verdict only holds for the info
+    // known when it was made (e.g. tested unauthenticated).
+    "Already settled — do not repeat these BLINDLY. RESOLVED = dead given the info known then; re-open one ONLY if you now have NEW leverage that wasn't available at resolution (fresh creds/access, a new technique/exploit, or the target changed). BLOCKED: honor its precondition. ATTEMPTED: retry only with a genuinely new technique.",
   ]
   for (const v of shown) {
     const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""

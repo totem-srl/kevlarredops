@@ -1559,6 +1559,23 @@ const layer = Layer.effect(
                     lines.push(resolvedVectorsCtx)
                   }
 
+                  // NEW-2: new leverage can re-open a vector that was resolved WITHOUT
+                  // it. When creds/access just landed this cycle, nudge reconsideration
+                  // of resolved dead ends (host-exhaustion / credential-reuse). One-shot:
+                  // only fires while the new creds/access are in the diff window.
+                  const newLeverage = recentChanges.some(
+                    (c) => c.action === "add_credential" || c.action === "add_access",
+                  )
+                  const resolvedCount = (state.resolved_vectors ?? []).filter((v) => v.status === "resolved").length
+                  if (newLeverage && resolvedCount > 0) {
+                    lines.push("")
+                    lines.push("<revisit-hint>")
+                    lines.push(
+                      `New credentials/access just landed. ${resolvedCount} vector(s) are marked RESOLVED — some were likely resolved WITHOUT this leverage (e.g. tested unauthenticated). A resolved verdict only holds for the info available when it was made: reconsider auth-gated dead ends now. state_query resolved_vectors for the list.`,
+                    )
+                    lines.push("</revisit-hint>")
+                  }
+
                   // Wordlist usage context
                   const wordlistUsages = yield* engagement.getWordlistUsages()
                   if (wordlistUsages.length > 0) {
