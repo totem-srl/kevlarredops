@@ -127,7 +127,7 @@ describe("toResolvedVectorsContext", () => {
       resolved_vectors: [
         vector({
           id: "grind",
-          target: "172.50.2.20:8080",
+          target: "192.0.2.20:8080",
           vector: "Dubbo CVE-2019-17564 Java-deser RCE",
           status: "attempted",
           attempt_log: [
