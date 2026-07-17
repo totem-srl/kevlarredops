@@ -423,7 +423,14 @@ export const StateQueryTool = Tool.define(
                 const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
                 const by = v.tested_by ? ` by:${v.tested_by}` : ""
                 const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
-                return `  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${by}${why}`
+                const head = `  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${by}${why}`
+                const log = (v.attempt_log ?? [])
+                  .map((a) => {
+                    const icon = a.outcome === "success" ? "✓" : a.outcome === "partial" ? "~" : "✗"
+                    return `      ${icon} ${a.technique}${a.detail ? ` — ${a.detail}` : ""}`
+                  })
+                  .join("\n")
+                return log ? `${head}\n${log}` : head
               })
               const label = f ? `Resolved vectors [${f}]` : "Resolved vectors"
               return {

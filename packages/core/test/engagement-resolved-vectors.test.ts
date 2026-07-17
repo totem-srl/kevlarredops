@@ -120,4 +120,55 @@ describe("toResolvedVectorsContext", () => {
     expect(ctx).toContain("…")
     expect(ctx).not.toContain(long) // full evidence is not inlined
   })
+
+  test("surfaces FAILED sub-attempts for in-progress vectors, not for resolved ones", () => {
+    const state: EngagementSchema.State = {
+      ...baseState(),
+      resolved_vectors: [
+        vector({
+          id: "grind",
+          target: "172.50.2.20:8080",
+          vector: "Dubbo CVE-2019-17564 Java-deser RCE",
+          status: "attempted",
+          attempt_log: [
+            { technique: "gadget CommonsCollections6", outcome: "failed", detail: "ClassNotFound on target classpath" },
+            { technique: "gadget ROME", outcome: "success", detail: "root shell" },
+          ],
+        }),
+        vector({
+          id: "done",
+          status: "resolved",
+          attempt_log: [{ technique: "payload X", outcome: "failed", detail: "validated input" }],
+        }),
+      ],
+    }
+    const ctx = EngagementSchema.toResolvedVectorsContext(state)!
+    // in-progress vector surfaces the failed technique with a don't-repeat marker
+    expect(ctx).toContain("gadget CommonsCollections6")
+    expect(ctx).toContain("don't repeat")
+    // the successful sub-attempt is NOT listed as a dead end
+    expect(ctx).not.toContain("gadget ROME")
+    // a resolved vector's attempt log is not expanded (one-liner suffices)
+    expect(ctx).not.toContain("payload X")
+  })
+})
+
+describe("VectorAttempt / attempt_log schema", () => {
+  test("round-trips attempt_log through encode/decode", () => {
+    const state: EngagementSchema.State = {
+      ...baseState(),
+      resolved_vectors: [
+        vector({
+          status: "attempted",
+          attempt_log: [
+            { technique: "gadget CC6", outcome: "failed", detail: "ClassNotFound", timestamp: "2026-07-16T09:10:00.000Z" },
+          ],
+        }),
+      ],
+    }
+    const encoded = Schema.encodeSync(EngagementSchema.State)(state)
+    const decoded = Schema.decodeUnknownSync(EngagementSchema.State)(encoded)
+    expect(decoded.resolved_vectors?.[0]?.attempt_log?.[0]?.technique).toBe("gadget CC6")
+    expect(decoded.resolved_vectors?.[0]?.attempt_log?.[0]?.outcome).toBe("failed")
+  })
 })

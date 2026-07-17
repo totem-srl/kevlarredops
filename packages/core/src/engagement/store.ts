@@ -32,6 +32,26 @@ function mergeServices(
   return [...byPort.values()]
 }
 
+// Merge in-vector sub-attempts, deduping by technique (a repeat of the same
+// technique updates its outcome/detail rather than appending a duplicate) and
+// capping to the most recent VECTOR_ATTEMPT_LOG_MAX.
+function mergeAttemptLog(
+  existing: readonly EngagementSchema.VectorAttempt[] | undefined,
+  incoming: readonly EngagementSchema.VectorAttempt[] | undefined,
+): EngagementSchema.VectorAttempt[] | undefined {
+  if (!existing?.length && !incoming?.length) return existing ? [...existing] : undefined
+  const byTechnique = new Map<string, EngagementSchema.VectorAttempt>()
+  for (const a of existing ?? []) byTechnique.set(a.technique, a)
+  for (const a of incoming ?? []) {
+    const prev = byTechnique.get(a.technique)
+    byTechnique.set(a.technique, prev ? { ...prev, ...a } : a)
+  }
+  const all = [...byTechnique.values()]
+  return all.length > EngagementSchema.VECTOR_ATTEMPT_LOG_MAX
+    ? all.slice(all.length - EngagementSchema.VECTOR_ATTEMPT_LOG_MAX)
+    : all
+}
+
 export interface Interface {
   readonly get: () => Effect.Effect<EngagementSchema.State | undefined>
   readonly save: (state: EngagementSchema.State) => Effect.Effect<void>
@@ -920,12 +940,13 @@ const layer = Layer.effect(
             tested_by: vector.tested_by ?? prev.tested_by,
             evidence: vector.evidence ?? prev.evidence,
             revisit_when: vector.revisit_when ?? prev.revisit_when,
+            attempt_log: mergeAttemptLog(prev.attempt_log, vector.attempt_log),
           }
           next = [...existing]
           next[idx] = merged
           created = false
         } else {
-          next = [...existing, { ...vector, attempts: vector.attempts ?? 1 }]
+          next = [...existing, { ...vector, attempts: vector.attempts ?? 1, attempt_log: mergeAttemptLog(undefined, vector.attempt_log) }]
           created = true
         }
         const trimmed = next.length > EngagementSchema.RESOLVED_VECTORS_MAX
