@@ -2,6 +2,7 @@ import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import { SessionV1 } from "@pentestcode/core/v1/session"
 import { ConfigV1 } from "@pentestcode/core/v1/config/config"
 import { Session } from "./session"
+import { Truncate } from "../tool/truncate"
 import { SessionID, MessageID, PartID } from "./schema"
 import { Provider } from "@/provider/provider"
 import { MessageV2 } from "./message-v2"
@@ -164,6 +165,7 @@ const layer = Layer.effect(
     const provider = yield* Provider.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
+    const truncate = yield* Truncate.Service
 
     const isOverflow = Effect.fn("SessionCompaction.isOverflow")(function* (input: {
       tokens: SessionV1.Assistant["tokens"]
@@ -278,6 +280,21 @@ const layer = Layer.effect(
       if (pruned > PRUNE_MINIMUM) {
         for (const part of toPrune) {
           if (part.state.status === "completed") {
+            // A-5: don't PERMANENTLY erase the output. Reuse an existing ref
+            // (C-4 / truncate outputPath) or write one now, and record it on the
+            // part so the compacted placeholder can point the agent to the full
+            // text — cold detail stays retrievable instead of lost.
+            const meta = part.state.metadata
+            const existingRef =
+              meta && typeof (meta as any).outputPath === "string" ? ((meta as any).outputPath as string) : undefined
+            const ref =
+              existingRef ??
+              (part.state.output
+                ? yield* truncate.write(part.state.output).pipe(Effect.catch(() => Effect.succeed(undefined)))
+                : undefined)
+            if (ref && !existingRef) {
+              part.state.metadata = { ...(meta && typeof meta === "object" ? meta : {}), outputPath: ref }
+            }
             part.state.time.compacted = Date.now()
             yield* session.updatePart(part)
           }
@@ -556,6 +573,7 @@ export const node = LayerNode.make({
     Provider.node,
     EventV2Bridge.node,
     RuntimeFlags.node,
+    Truncate.node,
   ],
 })
 
