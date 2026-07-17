@@ -364,21 +364,13 @@ export const NmapParseTool = Tool.define(
               }
             }
 
-            // Auto-create REACHABLE_FROM relationships between co-discovered hosts
-            if (hosts.length > 1) {
-              const ips = hosts.map((h) => h.ip)
-              for (let i = 0; i < ips.length; i++) {
-                for (let j = i + 1; j < ips.length; j++) {
-                  yield* store.addRelationship({
-                    source_type: "host",
-                    source_id: ips[i]!,
-                    rel_type: "REACHABLE_FROM",
-                    target_type: "host",
-                    target_id: ips[j]!,
-                  })
-                }
-              }
-            }
+            // NOTE: we deliberately do NOT synthesize REACHABLE_FROM edges here.
+            // Appearing together in one nmap scan means the scanner reached each host,
+            // NOT that the hosts can reach each other. Fabricating all-pairs reachability
+            // poisoned attack_path_suggest (Dijkstra/Yen over invented edges). Reachability
+            // is recorded only from OBSERVED evidence — a successful connection/route/pivot
+            // (e.g. cme_parse AUTHENTICATES_TO, an explicit state_update add_relationship,
+            // or bloodhound edges) — never inferred from co-scanning.
 
             // Persist to disk
             const updatedState = yield* store.get()
