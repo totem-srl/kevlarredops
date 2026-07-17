@@ -1387,7 +1387,8 @@ const layer = Layer.effect(
 
                   lines.push(`  Phase: ${state.current_phase}`)
                   lines.push(`  Mode: ${state.mode}`)
-                  if (modeDirective) lines.push("", modeDirective)
+                  // modeDirective is a rarely-changing instruction — emitted in the
+                  // cached static prefix (staticLines below), not this volatile block.
                   if (transitionHint) lines.push("", transitionHint)
 
                   let recentChanges: EngagementSchema.ChangelogEntry[] = []
@@ -1517,8 +1518,8 @@ const layer = Layer.effect(
                     lines.push("</auto-critic>")
                   }
 
-                  lines.push("")
-                  lines.push("REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.")
+                  // REMINDER (static tool-usage instruction) moved to the cached
+                  // static prefix — see staticLines below (C-2).
 
                   // Slash-command tips are user-facing — only the coordinator
                   // talks to the user, so subagents don't need them (QW2).
@@ -1564,21 +1565,30 @@ const layer = Layer.effect(
 
                   lines.push("</pentest-engagement>")
 
-                  // Pause behavior directive
+                  // --- Static / rarely-changing directives (C-2) ---
+                  // These depend only on mode/pause/agent/flags, not on per-turn facts,
+                  // so they belong in the CACHED system prefix, not the volatile block.
+                  // Keeping the whole ORCHESTRATOR_MODE text in the volatile lane meant it
+                  // was cache-WRITTEN every turn — the opposite of the static/volatile split.
+                  const staticLines: string[] = [
+                    "REMINDER: call state_update IMMEDIATELY after every discovery. Use parser tools (nmap_parse, cme_parse, nuclei_parse, gobuster_parse, sqlmap_parse) after their corresponding bash commands — they auto-update state. Use cred_spray when new creds found.",
+                  ]
+                  if (modeDirective) staticLines.push("", modeDirective)
+
                   const pauseBehavior = state.pause_on_finding ?? "never"
                   if (pauseBehavior !== "never" && pauseDirectives[pauseBehavior]) {
-                    lines.push("", pauseDirectives[pauseBehavior]!)
+                    staticLines.push("", pauseDirectives[pauseBehavior]!)
                   }
 
                   if (state.mode === "auto" && agent.name === "pentest") {
-                    lines.push("", ORCHESTRATOR_MODE)
+                    staticLines.push("", ORCHESTRATOR_MODE)
                   }
 
                   // AR1: when the deterministic orchestrator is enabled, `plan` is
                   // the single orchestration verb — the harness runs dispatch,
                   // collection, and status. Only the coordinator plans.
                   if (flags.experimentalOrchestrator && isCoordinator) {
-                    lines.push(
+                    staticLines.push(
                       "",
                       "<orchestrator-dag>",
                       "Deterministic orchestrator is ON. `task_graph plan` is your ONLY orchestration verb.",
@@ -1591,7 +1601,8 @@ const layer = Layer.effect(
                       "</orchestrator-dag>",
                     )
                   }
-                  return lines.join("\n")
+
+                  return { volatile: lines.join("\n"), static: staticLines.join("\n") }
                 } catch {
                   return undefined
                 }
@@ -1605,6 +1616,9 @@ const layer = Layer.effect(
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),
+              // Rarely-changing engagement directives ride the cached prefix (C-2),
+              // not the volatile trailing block.
+              ...(engagementCtx?.static ? [engagementCtx.static] : []),
             ]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
@@ -1615,7 +1629,7 @@ const layer = Layer.effect(
               sessionID,
               parentSessionID: session.parentID,
               system,
-              volatileSystem: engagementCtx,
+              volatileSystem: engagementCtx?.volatile,
               messages: [
                 ...modelMsgs,
                 ...(isLastStep ? [{ role: "assistant" as const, content: MAX_STEPS_PROMPT }] : []),
