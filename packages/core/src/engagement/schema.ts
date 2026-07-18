@@ -68,6 +68,29 @@ export const EvidenceItem = Schema.Struct({
 }).annotate({ identifier: "Engagement.EvidenceItem" })
 export type EvidenceItem = typeof EvidenceItem.Type
 
+// I-3: derive a vulnerability's confidence from real signal — corroboration
+// (independent tools agreeing, repeated observation) and exploitation state —
+// NOT from severity (severity is impact, not likelihood-of-being-real) and NOT a
+// hardcoded literal. A critic/manual verification dominates when present. Keep
+// this the single source of a vuln's confidence so the number means something and
+// the auto-critic (which gates on confidence) reacts to evidence, not a guess.
+export function deriveConfidence(vuln: {
+  status?: string
+  evidence_items?: ReadonlyArray<{ tool?: string; verification_status?: string }>
+}): number {
+  const items = vuln.evidence_items ?? []
+  if (items.some((e) => e.verification_status === "verified")) return 0.95
+  if (items.length > 0 && items.every((e) => e.verification_status === "false_positive")) return 0.1
+  let c = 0.5 // one unverified signal
+  const tools = new Set(items.map((e) => e.tool).filter(Boolean))
+  if (tools.size >= 2) c += 0.2 // independent tools corroborate
+  else if (items.length >= 2) c += 0.1 // repeated observation, same tool
+  if (vuln.status === "exploited") c += 0.25
+  else if (vuln.status === "confirmed") c += 0.1
+  else if (vuln.status === "suspected") c -= 0.15
+  return Math.round(Math.max(0.1, Math.min(0.95, c)) * 100) / 100
+}
+
 export const Vulnerability = Schema.Struct({
   id: Schema.optional(Schema.String),
   title: Schema.String,
@@ -320,6 +343,20 @@ export const VectorStatus = Schema.Literals([
 ])
 export type VectorStatus = typeof VectorStatus.Type
 
+// A single sub-attempt WITHIN a vector — the specific technique tried during a grind.
+// This is the in-vector memory: a hard exploit (deser gadget chains, payload variations,
+// shell-stabilization tricks) burns many attempts before the vector as a whole settles.
+// Logging each one means a re-spawn / post-compaction turn does not re-explore blind.
+export const VectorAttempt = Schema.Struct({
+  technique: Schema.String, // the specific approach, e.g. "gadget CommonsCollections6", "hessian2 base64 encoding"
+  outcome: Schema.Literals(["failed", "partial", "success"]),
+  detail: Schema.optional(Schema.String), // short reason/result, e.g. "ClassNotFound on target classpath"
+  timestamp: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.VectorAttempt" })
+export type VectorAttempt = typeof VectorAttempt.Type
+
+export const VECTOR_ATTEMPT_LOG_MAX = 20 // per-vector cap on sub-attempt history
+
 export const ResolvedVector = Schema.Struct({
   id: Schema.String,
   timestamp: Schema.String,
@@ -330,6 +367,7 @@ export const ResolvedVector = Schema.Struct({
   attempts: Schema.optional(Schema.Number), // how many times it has been probed
   evidence: Schema.optional(Schema.String), // short reason it is settled (why dead / why blocked)
   revisit_when: Schema.optional(Schema.String), // for "blocked": the precondition to wait on
+  attempt_log: Schema.optional(Schema.Array(VectorAttempt)), // in-vector memory: per-technique sub-attempts
 }).annotate({ identifier: "Engagement.ResolvedVector" })
 export type ResolvedVector = typeof ResolvedVector.Type
 
@@ -624,19 +662,49 @@ export function decisionSummary(decisions: Decision[]): {
 // so no agent re-opens a dead end. `resolved`/`confirmed` are hard "don't retest";
 // `blocked` lists the precondition; `attempted` is advisory (retry only with a new
 // technique). Kept small — this rides in every turn's context for every role.
-export function toResolvedVectorsContext(state: State, max = 40): string | undefined {
-  const vectors = state.resolved_vectors ?? []
+// NEW-1: this block is injected EVERY turn for both roles and was the single
+// heaviest volatile block on a real engagement (~3.5k tok, 62 vectors) — the
+// verbose per-vector evidence strings dominated. Keep the anti-re-test guarantee
+// but bound the cost: (a) drop CONFIRMED vectors — those are successes already
+// recorded as vulnerabilities, not dead ends to avoid; (b) clip evidence/revisit
+// text; (c) tighter cap. Everything (incl. confirmed + full evidence) stays in
+// `state_query resolved_vectors`.
+export function toResolvedVectorsContext(state: State, max = 30): string | undefined {
+  const all = state.resolved_vectors ?? []
+  if (all.length === 0) return undefined
+  const vectors = all.filter((v) => v.status !== "confirmed")
   if (vectors.length === 0) return undefined
-  const rank: Record<string, number> = { resolved: 0, blocked: 1, confirmed: 2, attempted: 3 }
+  const rank: Record<string, number> = { resolved: 0, blocked: 1, attempted: 2 }
   const sorted = [...vectors].sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9))
   const shown = sorted.slice(0, max)
-  const lines = ["<resolved-vectors>", "Vectors already settled — DO NOT re-test resolved/confirmed; honor blocked preconditions:"]
+  const clip = (s: string) => (s.length > 90 ? s.slice(0, 90) + "…" : s)
+  const lines = [
+    "<resolved-vectors>",
+    // NEW-2: license informed re-testing. The ledger kills BLIND repetition, not
+    // evidence-driven reconsideration — a RESOLVED verdict only holds for the info
+    // known when it was made (e.g. tested unauthenticated).
+    "Already settled — do not repeat these BLINDLY. RESOLVED = dead given the info known then; re-open one ONLY if you now have NEW leverage that wasn't available at resolution (fresh creds/access, a new technique/exploit, or the target changed). BLOCKED: honor its precondition. ATTEMPTED: retry only with a genuinely new technique.",
+  ]
   for (const v of shown) {
     const n = v.attempts && v.attempts > 1 ? ` x${v.attempts}` : ""
-    const why = v.status === "blocked" && v.revisit_when ? ` (revisit: ${v.revisit_when})` : v.evidence ? ` — ${v.evidence}` : ""
+    const why =
+      v.status === "blocked" && v.revisit_when
+        ? ` (revisit: ${clip(v.revisit_when)})`
+        : v.evidence
+          ? ` — ${clip(v.evidence)}`
+          : ""
     lines.push(`  [${v.status.toUpperCase()}] ${v.target} :: ${v.vector}${n}${why}`)
+    // For vectors still in progress, surface the techniques already tried so a
+    // re-spawn / post-compaction turn does not repeat the same dead-end sub-attempts.
+    if (v.status === "attempted" || v.status === "blocked") {
+      const failed = (v.attempt_log ?? []).filter((a) => a.outcome === "failed").slice(-6)
+      for (const a of failed) {
+        lines.push(`      ✗ tried: ${a.technique}${a.detail ? ` — ${a.detail}` : ""} (don't repeat)`)
+      }
+    }
   }
-  if (sorted.length > shown.length) lines.push(`  … +${sorted.length - shown.length} more (state_query resolved_vectors)`)
+  const hidden = all.length - shown.length
+  if (hidden > 0) lines.push(`  … +${hidden} more (incl. confirmed) — state_query resolved_vectors`)
   lines.push("</resolved-vectors>")
   return lines.join("\n")
 }

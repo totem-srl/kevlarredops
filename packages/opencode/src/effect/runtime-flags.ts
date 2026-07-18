@@ -53,6 +53,12 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   // Delay in ms between spawns within a single pump, to pace provider load and
   // avoid bursting into rate limits. undefined -> code default.
   orchestratorStaggerMs: positiveInteger("OPENCODE_ORCHESTRATOR_STAGGER_MS"),
+  // S-1: coalesce window (ms) for coordinator wake-ups. Subagent completions that
+  // land within this window are batched into ONE synthetic coordinator turn
+  // instead of N (each of which replays the full transcript). Dispatch is
+  // unaffected — the rolling pump refills slots on every settle regardless.
+  // undefined -> code default (1500). Set very low to approximate per-completion.
+  orchestratorCoalesceMs: positiveInteger("OPENCODE_ORCHESTRATOR_COALESCE_MS"),
   // Max concurrent main-model LLM streams per provider (coordinator + subagents).
   // Caps outbound concurrency so a fan-out doesn't saturate the provider into
   // 429/529 overloads. undefined -> code default. Small-model (offload/title)

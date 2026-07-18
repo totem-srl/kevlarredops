@@ -290,8 +290,19 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         if (part.type === "tool") {
           toolNames.add(part.tool)
           if (part.state.status === "completed") {
+            // A-5: a pruned tool result keeps a ref to its full output (set by
+            // prune / C-4), so the placeholder can point the agent to it instead
+            // of leaving the detail unrecoverable.
+            const prunedRef =
+              part.state.time.compacted &&
+              part.state.metadata &&
+              typeof (part.state.metadata as any).outputPath === "string"
+                ? ((part.state.metadata as any).outputPath as string)
+                : undefined
             const outputText = part.state.time.compacted
-              ? "[Old tool result content cleared]"
+              ? prunedRef
+                ? `[Old tool result cleared to save context — full output saved to ${prunedRef}; read it if you need the detail]`
+                : "[Old tool result content cleared]"
               : truncateToolOutput(part.state.output, options?.toolOutputMaxChars)
             const attachments = part.state.time.compacted || options?.stripMedia ? [] : (part.state.attachments ?? [])
 

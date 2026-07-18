@@ -10,7 +10,7 @@ import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
-import { Effect, Exit, Schema, Scope, Semaphore } from "effect"
+import { Effect, Exit, Ref, Schema, Scope, Semaphore } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Database } from "@pentestcode/core/database/database"
@@ -47,6 +47,12 @@ const BACKGROUND_UPDATED = "Context sent to the running background task — you'
 const CONTEXT_PROTOCOL = [
   "<context-protocol>",
   "Your engagement state (hosts, confirmed vulns, credentials, already-tested vectors) is shared and visible to you. Before acting, query it with state_query. Do NOT re-test or re-report anything already confirmed in state, and do NOT expect findings/creds/tokens to be pasted into this prompt — pull them yourself. Record every new finding immediately via state_update / the parser tools.",
+  "END your FINAL message with this machine-read result block so your work is filed accurately for the coordinator and later agents (this is parsed verbatim — do not rely on prose being interpreted):",
+  "<agent-result>",
+  "findings: confirmed facts you established — vulns/creds/access/live hosts+services; one per '|', or 'none'",
+  "dead_ends: vectors you tried that did NOT work (so no one retries them); one per '|', or 'none'",
+  "next: concrete recommended next steps; one per '|', or 'none'",
+  "</agent-result>",
   "</context-protocol>",
 ].join("\n")
 
@@ -88,6 +94,39 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+// I-1: parse the machine-read <agent-result> trailer that CONTEXT_PROTOCOL asks
+// every subagent to emit. This replaces guessing findings/failures from prose by
+// substring match (which silently misfiled a real finding as a "failure"). Returns
+// undefined when no trailer is present, so the legacy heuristic still runs —
+// graceful degradation for non-compliant / older output.
+export function parseResultTrailer(
+  text: string,
+): { findings: string[]; failures: string[]; next: string[] } | undefined {
+  const blocks = text.match(/<agent-result>([\s\S]*?)<\/agent-result>/gi)
+  if (!blocks || blocks.length === 0) return undefined
+  const body = blocks[blocks.length - 1]!.replace(/<\/?agent-result>/gi, "")
+  const pick = (labels: string[]): string[] => {
+    for (const line of body.split("\n")) {
+      const m = line.match(/^\s*([a-z_ ]+):\s*(.*)$/i)
+      if (!m) continue
+      const key = m[1]!.trim().toLowerCase().replace(/\s+/g, "_")
+      if (!labels.includes(key)) continue
+      return m[2]!
+        .split("|")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0 && s.toLowerCase() !== "none")
+        .map((s) => s.slice(0, 200))
+        .slice(0, 10)
+    }
+    return []
+  }
+  return {
+    findings: pick(["findings", "finding"]),
+    failures: pick(["dead_ends", "dead_end", "failures", "failed", "failed_attempts"]),
+    next: pick(["next", "recommended", "recommended_next", "next_steps"]),
+  }
+}
+
 function buildContextSummary(
   params: { description: string; subagent_type: string },
   sessionID: string,
@@ -98,34 +137,43 @@ function buildContextSummary(
   const failures: string[] = []
   const next: string[] = []
 
-  for (const line of text.split("\n")) {
-    const lower = line.toLowerCase().trim()
-    if (!lower) continue
-    if (
-      lower.includes("found") ||
-      lower.includes("discovered") ||
-      lower.includes("identified") ||
-      lower.includes("confirmed")
-    ) {
-      findings.push(line.trim().slice(0, 200))
-    } else if (
-      lower.includes("failed") ||
-      lower.includes("error") ||
-      lower.includes("denied") ||
-      lower.includes("timeout")
-    ) {
-      failures.push(line.trim().slice(0, 200))
-    } else if (
-      lower.includes("recommend") ||
-      lower.includes("next") ||
-      lower.includes("should") ||
-      lower.includes("suggest")
-    ) {
-      next.push(line.trim().slice(0, 200))
+  const parsed = parseResultTrailer(text)
+  if (parsed) {
+    // Trailer present — trust the subagent's own typed classification.
+    findings.push(...parsed.findings)
+    failures.push(...parsed.failures)
+    next.push(...parsed.next)
+  } else {
+    // No trailer — fall back to the legacy prose heuristic.
+    for (const line of text.split("\n")) {
+      const lower = line.toLowerCase().trim()
+      if (!lower) continue
+      if (
+        lower.includes("found") ||
+        lower.includes("discovered") ||
+        lower.includes("identified") ||
+        lower.includes("confirmed")
+      ) {
+        findings.push(line.trim().slice(0, 200))
+      } else if (
+        lower.includes("failed") ||
+        lower.includes("error") ||
+        lower.includes("denied") ||
+        lower.includes("timeout")
+      ) {
+        failures.push(line.trim().slice(0, 200))
+      } else if (
+        lower.includes("recommend") ||
+        lower.includes("next") ||
+        lower.includes("should") ||
+        lower.includes("suggest")
+      ) {
+        next.push(line.trim().slice(0, 200))
+      }
     }
   }
 
-  // Fall back to truncation if no heuristic matches
+  // Guarantee some carried context even if everything came back empty.
   if (findings.length === 0 && failures.length === 0 && next.length === 0) {
     findings.push(text.slice(0, 500))
   }
@@ -257,6 +305,70 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
             ).length,
         ),
       )
+
+  // S-1: coalesce coordinator wake-ups. Each subagent completion goes onto this
+  // queue instead of immediately re-driving the coordinator (which replays the
+  // whole transcript). A single flusher fiber batches everything that lands in a
+  // short window into ONE synthetic coordinator turn. Dispatch is untouched — the
+  // rolling `pump` still refills slots on every settle. Interrupt alerts do NOT
+  // go here; they inject immediately (separate, urgent path).
+  const coalesceMs = flags.orchestratorCoalesceMs ?? 1500
+  type Settled = { ctx: Tool.Context; variant: string | undefined; childId: string; description: string; status: "completed" | "error"; text: string }
+  const pendingInjects = yield* Ref.make<Settled[]>([])
+  const flushScheduled = yield* Ref.make(false)
+
+  const flushBatch = (batch: Settled[]) =>
+    Effect.gen(function* () {
+      if (batch.length === 0) return
+      const ctx = batch[0]!.ctx
+      const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
+      if (!ops) return
+      const currentParent = yield* sessions.get(ctx.sessionID)
+      const body = batch
+        .map((r) =>
+          renderOutput({
+            sessionID: r.childId as SessionID,
+            state: r.status,
+            summary: r.status === "completed" ? `Subagent completed: ${r.description}` : `Subagent failed: ${r.description}`,
+            text: r.text,
+          }),
+        )
+        .join("\n\n")
+      // One orchestrator note reflecting state AFTER the whole batch settled.
+      const running = yield* realInFlight(ctx)
+      const ws = Orchestrator.waveStatus(yield* engagementStore.getTaskGraph())
+      const drained = running === 0 && ws.ready.length === 0 && ws.inFlight.length === 0
+      const note = drained
+        ? `\n\n[orchestrator] All planned tasks are settled and nothing is running (blocked: ${ws.blocked.length}). Give the next objectives via task_graph plan, or conclude against coverage/objectives — do NOT stop early if objectives remain.`
+        : `\n\n[orchestrator] ${running} subagent(s) running; the harness auto-dispatches dependent tasks as slots free. You'll be notified as each finishes — do not poll.`
+      yield* ops
+        .prompt({
+          sessionID: ctx.sessionID,
+          agent: currentParent.agent ?? ctx.agent,
+          variant: batch[0]!.variant,
+          parts: [{ type: "text", synthetic: true, text: body + note }],
+        })
+        .pipe(Effect.ignore)
+    })
+
+  // Debounce: the first completion arms a single flush after `coalesceMs`; any
+  // completions that land during the window join the same batch and inject as ONE
+  // coordinator turn. `flushScheduled` is cleared BEFORE draining so a completion
+  // arriving mid-drain re-arms (never lost; at worst one harmless empty flush).
+  const enqueueInject = (item: Settled) =>
+    Effect.gen(function* () {
+      yield* Ref.update(pendingInjects, (a) => [...a, item])
+      const start = yield* Ref.modify(flushScheduled, (scheduled) =>
+        scheduled ? ([false, true] as const) : ([true, true] as const),
+      )
+      if (!start) return
+      yield* Effect.gen(function* () {
+        if (coalesceMs > 0) yield* Effect.sleep(`${coalesceMs} millis`)
+        yield* Ref.set(flushScheduled, false)
+        const batch = yield* Ref.getAndSet(pendingInjects, [])
+        yield* flushBatch(batch).pipe(Effect.catchCause(() => Effect.void))
+      }).pipe(Effect.forkIn(scope))
+    })
 
   const spawnOne = (ctx: Tool.Context, node: TaskGraph.TaskNode) =>
     Effect.gen(function* () {
@@ -395,16 +507,15 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
           buildContextSummary({ description, subagent_type: subagentType }, nextSession.id, status, text),
         )
 
-        // Rolling refill: dependents whose deps just cleared start now.
+        // Rolling refill: dependents whose deps just cleared start now. This is
+        // what keeps the pipeline moving — it does NOT depend on the coordinator
+        // being woken, so coalescing the wake-up (below) never stalls dispatch.
         yield* pump(ctx)
 
-        const running = yield* realInFlight(ctx)
-        const ws = Orchestrator.waveStatus(yield* engagementStore.getTaskGraph())
-        const drained = running === 0 && ws.ready.length === 0 && ws.inFlight.length === 0
-        const note = drained
-          ? `\n\n[orchestrator] All planned tasks are settled and nothing is running (blocked: ${ws.blocked.length}). Give the next objectives via task_graph plan, or conclude against coverage/objectives — do NOT stop early if objectives remain.`
-          : `\n\n[orchestrator] ${running} subagent(s) running; the harness auto-dispatches dependent tasks as slots free. You'll be notified as each finishes — do not poll.`
-        yield* inject(status, text + note)
+        // S-1: enqueue for a coalesced coordinator wake-up instead of re-driving a
+        // full coordinator turn per completion. The running/drained note is built
+        // at flush time so it reflects state after the whole batch.
+        yield* enqueueInject({ ctx, variant, childId: nextSession.id, description, status, text })
       })
 
       const notify = Effect.fn("Orchestrator.notify")(function* (jobID: string) {

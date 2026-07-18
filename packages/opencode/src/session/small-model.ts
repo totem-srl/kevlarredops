@@ -4,6 +4,7 @@ import type { Agent } from "../agent/agent"
 import type { Provider } from "@/provider/provider"
 import type { SessionV1 } from "@pentestcode/core/v1/session"
 import type { LLM } from "./llm"
+import { isRecord } from "@/util/record"
 
 // AR2 (cheap-model offload) — NARROW scope: digest large raw tool outputs on the
 // small model before they enter the expensive model's transcript. The raw output
@@ -33,6 +34,44 @@ export const MAX_DIGEST_INPUT = 16000
 // (parsers, state_query, read, report_gen, …) are never summarized — their output
 // is already compact and the agent needs it verbatim.
 export const SUMMARIZE_TOOLS = new Set(["bash"])
+
+// Universal backstop cap (C-4). AR2 offload only covers `bash` and only when a
+// small model is configured; every other large output (a parser dumping a big
+// /24 scan, state_query, or bash with no small model) previously rode the
+// expensive transcript verbatim. Any tool output above this that the tool did
+// NOT already summarize/truncate/ref is capped at the result boundary, with the
+// full text kept retrievable by ref. Set above SUMMARIZE_THRESHOLD so the
+// cheap-model digest (better than a blunt cut) always takes precedence for bash.
+export const OUTPUT_HARD_CAP = 16000
+
+// C-4 (pure, tested): decide whether a tool result still needs the backstop cap.
+// Only STRING outputs strictly above the cap that the tool did NOT already handle
+// (summarized / truncated / written to a ref) are capped — so we never double-cap
+// or clip an output a precision path already shaped.
+export function shouldCapOutput(output: unknown, metadata: unknown, cap = OUTPUT_HARD_CAP): output is string {
+  if (typeof output !== "string" || output.length <= cap) return false
+  if (isRecord(metadata) && metadata.summarized === true) return false
+  if (isRecord(metadata) && metadata.truncated === true) return false
+  if (isRecord(metadata) && typeof metadata.outputPath === "string") return false
+  return true
+}
+
+// C-4 (pure, tested): build the capped transcript copy. INVARIANT: the first `cap`
+// characters are preserved VERBATIM (no head loss), the total byte count is stated,
+// and — when a ref was written — the full text stays retrievable. Returns the new
+// output plus a metadata patch to merge onto the part.
+export function buildCappedOutput(
+  raw: string,
+  ref: string | undefined,
+  cap = OUTPUT_HARD_CAP,
+): { output: string; metadataPatch: { truncated: true; original_bytes: number; outputPath?: string } } {
+  return {
+    output: `${raw.slice(0, cap)}\n\n[Output truncated: ${raw.length} bytes total, showing the first ${cap}.${
+      ref ? ` Full output saved to ${ref} — read it for exact detail.` : ""
+    } Parser tools also write full results to engagement state — use state_query.]`,
+    metadataPatch: { truncated: true, original_bytes: raw.length, ...(ref ? { outputPath: ref } : {}) },
+  }
+}
 
 const SYSTEM = `You are a compression worker for a penetration-testing agent. You receive the raw stdout/stderr of a shell command (nmap, nuclei, gobuster, netexec, curl, cat, etc.). Produce a DENSE, factual digest that keeps everything the strategist needs and drops the rest.
 
