@@ -17,33 +17,29 @@
 
 ---
 
-PentestCode is an AI pentesting agent that runs tools, analyzes results, and makes decisions in your terminal. Hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT), rebuilt for offensive security.
+**PentestCode is an autonomous pentesting agent for your terminal.** Point it at a target and it runs the tools, reads the output, updates its picture of the network, and decides what to do next — the way an operator would. A hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT), stripped of the code-editing focus and rebuilt for offensive security.
 
-> **Beta** — works on real engagements and CTFs, but expect rough edges. [Open an issue](https://github.com/s0ld13rr/pentestcode/issues) if something breaks.
+> **Beta** — it holds up on real engagements and CTFs, but expect rough edges. [File an issue](https://github.com/s0ld13rr/pentestcode/issues) when something breaks; that's what makes it better.
 
-## What It Actually Does
+## What it does
 
-You give it a target — it does the rest:
+One instruction in, a full attack chain out:
 
 ```
 you: "pentest 10.10.10.5, goal is domain admin"
 ```
 
-| Step | What happens |
-|------|-------------|
-| Scan | `nmap -sS -p-` → finds 7 open ports, auto-parses XML into engagement state |
-| Recognize | Ports 88 + 389 → Domain Controller. Spawns 3 enumerators in parallel (SMB, LDAP, HTTP) |
-| Enumerate | Null session on SMB → writable share. LDAP → user list. Gobuster → web dirs |
-| Attack | AS-REP roast → crackable hash → valid credential |
-| Spray | Credential sprayed across SMB, WinRM, LDAP, RDP on all known hosts |
-| Exploit | WinRM access → spawns post-exploit agent → dumps SAM/LSA/DPAPI |
-| Result | Domain admin hash. Every step recorded in state with evidence chain |
+| Stage | What the agent does |
+|-------|---------------------|
+| **Scan** | `nmap -sS -p-` finds 7 open ports and parses the XML straight into engagement state |
+| **Recognize** | Ports 88 + 389 → Domain Controller. Fans out three enumerators in parallel (SMB, LDAP, HTTP) |
+| **Enumerate** | Null SMB session → writable share. LDAP → user list. Gobuster → web dirs |
+| **Attack** | AS-REP roast → crackable hash → first valid credential |
+| **Spray** | That credential sprayed across SMB, WinRM, LDAP and RDP on every known host |
+| **Exploit** | WinRM foothold → post-exploit agent dumps SAM / LSA / DPAPI |
+| **Result** | Domain admin hash in hand — every step recorded with its evidence chain |
 
-Every finding lands in `findings.md` (human-readable) and `state.json` (structured). Check progress anytime: `/status`, `/vulns`, `/creds`.
-
-**Good at:** methodical enumeration, credential spraying, not forgetting to check things. It sprays every cred against every service on every host — something humans routinely skip.
-
-**Bad at:** complex exploit chains, creative intuition, stealth. It doesn't replace a pentester — it's a force multiplier.
+It's methodical where people get lazy: it sprays every credential against every service on every host, and it doesn't forget to check things. Everything it learns lands in a structured state you can query mid-run with `/status`, `/vulns`, or `/creds`.
 
 ## Install
 
@@ -51,7 +47,7 @@ Every finding lands in `findings.md` (human-readable) and `state.json` (structur
 curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
 ```
 
-Self-contained binary — no Bun, Node, or runtime needed. Works on Linux and macOS (x64/arm64).
+A single self-contained binary — no Bun, Node, or runtime to install. Linux and macOS, x64 and arm64.
 
 <details>
 <summary>Other options</summary>
@@ -75,24 +71,23 @@ bun run build --single --skip-embed-web-ui
 
 </details>
 
-## Quick Start
+## Quick start
 
 ```bash
-# Authenticate with your LLM provider
-pentestcode auth login
-
-# Launch
-pentestcode
-
-# Or one-shot with a prompt
-pentestcode --prompt "scan 10.10.10.0/24 and enumerate all services"
+pentestcode auth login          # connect your LLM provider
+pentestcode                     # interactive session
+pentestcode --prompt "scan 10.10.10.0/24 and enumerate all services"   # one-shot
 ```
 
-Supports 20+ providers: Anthropic, OpenAI, Google, Azure, Ollama, and more. 
+Works with 20+ providers through [ai-sdk](https://github.com/vercel/ai) — Anthropic, OpenAI, Google, Azure, AWS Bedrock, Ollama, and more.
 
-## Architecture
+## How it works
 
-Strategist-coordinator model based on [HPTSA research](https://arxiv.org/abs/2410.02246) (4.3x improvement over single-agent):
+Two things separate PentestCode from a pentester prompt pasted into a chat window: **a team of agents** and **a memory they share**.
+
+### A team, not a monologue
+
+The design follows the strategist-coordinator model from [HPTSA research](https://arxiv.org/abs/2410.02246) — a 4.3× improvement over a single agent:
 
 ```
                     ┌─────────────┐
@@ -107,30 +102,26 @@ Strategist-coordinator model based on [HPTSA research](https://arxiv.org/abs/241
         └──────┘└──────┘└──────┘└──────┘└──────┘
 ```
 
-The coordinator (`pentest`) breaks work into tasks and spawns specialist subagents in parallel. Each subagent has its own system prompt, tool permissions, and domain knowledge. They share a single engagement state — when the scanner finds a port, the enumerator can see it immediately.
+The lead agent (`pentest`) breaks the engagement into tasks and dispatches specialist subagents in parallel — each with its own system prompt, tool permissions, and domain knowledge. **13 agents in all:** recon, scanner, enumerator, exploiter, identity (AD/Kerberos), infrastructure (SNMP/IPMI/databases), webapp (OWASP Top 10), post-exploit, exploit-dev, critic (false-positive checker), reporter, plus hidden agents for context compression and session management.
 
-**13 agents total:** recon, scanner, enumerator, exploiter, identity (AD/Kerberos), infrastructure (SNMP/IPMI/databases), webapp (OWASP Top 10), post-exploit, exploit-dev, critic (false positive checker), reporter, plus hidden agents for context compression and session management.
+### A memory they all share
 
-## Engagement State
-
-This is what makes PentestCode different from "put a pentester prompt in ChatGPT." Everything the agent discovers is recorded in a structured state:
+When the scanner finds a port, the enumerator sees it instantly — because every agent reads from and writes to one structured **engagement state**:
 
 - **Hosts & services** — IP, hostname, OS, ports, service versions, banners
-- **Vulnerabilities** — severity, status (suspected/confirmed/exploited), evidence chain, confidence score
-- **Credentials** — username, hash/password, type, domain, what they're valid for
-- **Access** — who has shell/RDP/DB access on which host, privilege level
-- **Relationships** — entity graph (EXPLOITED_VIA, CREDENTIAL_FROM, ADMIN_OF, PIVOT_TO, etc.)
+- **Vulnerabilities** — severity, status (suspected / confirmed / exploited), evidence chain, confidence score
+- **Credentials** — username, hash/password, type, domain, what they unlock
+- **Access** — who holds shell/RDP/DB on which host, at what privilege level
+- **Relationships** — an entity graph (EXPLOITED_VIA, CREDENTIAL_FROM, ADMIN_OF, PIVOT_TO, …)
 - **AD domain model** — domain controllers, trusts, admins, password policy, GPOs
 - **Network segments** — VLANs, reachable networks, pivot hosts
-- **Attack path** — cost-based Dijkstra + Yen's K-shortest paths through the relationship graph
+- **Attack paths** — cost-based Dijkstra + Yen's K-shortest routes through the relationship graph
 
-State persists across sessions. Close the terminal, come back tomorrow, the agent picks up where you left off.
-
-The agent also keeps a `findings.md` — a human-readable log of every vulnerability, credential, and access gain with timestamps and evidence. You can `tail -f` it during a session to watch findings roll in.
+State survives the session: close the terminal, come back tomorrow, and the agent resumes where it stopped. Alongside it, a human-readable `findings.md` logs every vulnerability, credential, and access gain with timestamps — `tail -f` it to watch the engagement unfold.
 
 ## Tools
 
-18 built-in pentest tools beyond bash:
+18 built-in pentest tools beyond bash. Parser tools are mandatory: after running nmap the agent must pipe the output through `nmap_parse` rather than grep the XML by hand, so every finding reaches the engagement state.
 
 | Tool | What it does |
 |------|-------------|
@@ -144,26 +135,26 @@ The agent also keeps a `findings.md` — a human-readable log of every vulnerabi
 | `jwt_analyze` | Decode JWT, check alg:none/weak HMAC/expiry |
 | `cred_spray` | Plan credential spray across all discovered services |
 | `scope_check` | CIDR/wildcard scope validation |
-| `attack_path_suggest` | Cost-based path finding through relationship graph |
+| `attack_path_suggest` | Cost-based path finding through the relationship graph |
 | `tunnel_manage` | Plan SSH/chisel/ligolo tunnels, track live sessions |
 | `phase_control` | Phase management with quality gates |
 | `report_gen` | Generate markdown/JSON pentest reports |
 | `state_update` | Record findings (30+ mutation types, batch mode) |
 | `state_query` | Query engagement state (20+ query types) |
 
-Parser tools are mandatory — after running nmap, the agent must pipe output through `nmap_parse` instead of manually grepping XML. This ensures every finding hits the engagement state.
-
 ## Skills
 
-19 curated knowledge packs loaded on demand:
+19 curated knowledge packs, loaded on demand so they cost context only when relevant:
 
 - **Phase checklists** (6) — what to do in each pentest phase
 - **Service knowledge** (9) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD
 - **Playbooks** (4) — infrastructure, Active Directory, web application, cloud
 
-Skills are plain markdown files. Add your own by dropping a `SKILL.md` in the skills directory — no code changes needed.
+Skills are plain markdown. Add your own by dropping a `SKILL.md` into the skills directory — no code changes needed.
 
-## Slash Commands
+## Commands & modes
+
+Drive a live session with slash commands:
 
 | Command | What it does |
 |---------|-------------|
@@ -173,40 +164,31 @@ Skills are plain markdown files. Add your own by dropping a `SKILL.md` in the sk
 | `/creds` | Discovered credentials |
 | `/scope` | View/edit target scope |
 | `/phase` | Phase management |
-| `/mode` | Switch auto/free/guided |
-| `/pause` | Pause on findings (never/always/checkpoint) |
-| `/report` | Generate pentest report |
+| `/mode` | Switch auto / free / guided |
+| `/pause` | Pause on findings (never / always / checkpoint) |
+| `/report` | Generate a pentest report |
 
-## Modes
+And set how much rope the agent gets:
 
-- **auto** — agent runs through pentest phases autonomously, spawning subagents as needed
-- **free** — no phase structure, agent responds to your requests directly (bypasses scope checks)
-- **guided** — step-by-step, agent proposes actions and waits for approval
+- **auto** — runs through the pentest phases autonomously, spawning subagents as needed
+- **free** — no phase structure; responds to your requests directly (bypasses scope checks)
+- **guided** — step by step; proposes each action and waits for approval
 
-You can combine modes with pause behavior: `auto` + `pause always` = autonomous execution that stops at every finding for your review.
+Modes combine with pause behavior — `auto` + `pause always` gives you autonomous execution that stops at every finding for review.
 
-## Use Cases
+## Use cases
 
-PentestCode is designed to be universal across offensive security:
+One toolkit across offensive security:
 
 - **Penetration testing** — full methodology from recon to reporting
 - **CTF competitions** — flag tracking, objective management, multi-target coordination
 - **Bug bounty** — web app testing, API security, recon automation
 - **Vulnerability research** — systematic enumeration and validation
-- **Infrastructure security** — network service auditing, default credential checking
-
-## Honest Limitations
-
-- **Token-hungry.** A real engagement can burn $5-50 in API calls depending on scope and model. Large scans with verbose output make this worse.
-- **Repeats work.** Despite wordlist tracking and state diffs, the agent sometimes re-runs tools it already ran. We're improving this.
-- **No GUI.** Terminal only. No Burp Suite integration, no browser automation, no proxy interception.
-- **Prompt-dependent.** The quality of results varies significantly between LLM providers. Claude Opus/Sonnet >> GPT-4o > local models for multi-agent coordination.
-- **Not stealthy.** The agent doesn't think about OPSEC by default. Fine for authorized tests, not for red team stealth operations.
-- **Alpha software.** APIs may change, engagement state format may change, things may break between versions.
+- **Infrastructure security** — network service auditing, default-credential checks
 
 ## Configuration
 
-Config at `.pentestcode/pentestcode.jsonc`:
+Config lives at `.pentestcode/pentestcode.jsonc`:
 
 ```jsonc
 {
@@ -218,17 +200,17 @@ Config at `.pentestcode/pentestcode.jsonc`:
 }
 ```
 
-Supports: Anthropic, OpenAI, Google, Azure, AWS Bedrock, Ollama, Together, Groq, Fireworks, DeepSeek, Mistral, and more via [ai-sdk](https://github.com/vercel/ai).
+Providers: Anthropic, OpenAI, Google, Azure, AWS Bedrock, Ollama, Together, Groq, Fireworks, DeepSeek, Mistral, and more via [ai-sdk](https://github.com/vercel/ai).
 
 ## Contributing
 
-We want bug reports from real usage. If you run PentestCode on a CTF box, an HTB machine, or an authorized pentest and something goes wrong — the agent loops, misses an obvious path, crashes on tool output, or wastes tokens — open an issue with:
+Bug reports from real usage are the most valuable thing you can send. Run PentestCode on a CTF box, an HTB machine, or an authorized pentest, and when something goes wrong — it loops, misses an obvious path, chokes on tool output, or wastes tokens — open an issue with:
 
 1. What you were testing (target type, not sensitive details)
 2. What went wrong
 3. The `findings.md` and/or relevant session output
 
-Feature requests and PRs welcome. The codebase is TypeScript with Effect library — see [CLAUDE.md](CLAUDE.md) for architecture details.
+Feature requests and PRs are welcome too. The codebase is TypeScript on the Effect library — see [CLAUDE.md](CLAUDE.md) for architecture.
 
 ## License
 
