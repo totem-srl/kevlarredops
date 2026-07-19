@@ -83,7 +83,11 @@ check_avx2() {
 main() {
   info "Installing PentestCode..."
 
-  local os arch libc avx2 asset_name ext download_url tmp_dir
+  local os arch libc avx2 asset_name ext download_url
+  # tmp_dir is intentionally NOT local: the EXIT cleanup trap runs in the global
+  # scope after install() returns, so a local would be out of scope there and,
+  # under `set -u`, abort with "unbound variable" (exit 1) — even on a successful
+  # install. Keeping it global lets the trap both see it and actually clean up.
 
   os="$(detect_os)"
   arch="$(detect_arch)"
@@ -116,7 +120,7 @@ main() {
 
   # download
   tmp_dir="$(mktemp -d)"
-  trap 'rm -rf "$tmp_dir"' EXIT
+  trap 'rm -rf "${tmp_dir:-}" 2>/dev/null || true' EXIT
 
   info "Downloading ${download_url}..."
   if ! curl -fsSL -o "${tmp_dir}/archive.${ext}" "$download_url"; then
