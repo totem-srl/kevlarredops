@@ -72,6 +72,9 @@ Not every reachable service is the intended path; networks contain support servi
 - A service offering an "easy" win (default creds, obvious brute) that yields nothing actionable after a couple of focused attempts AND does not lead inward is likely a dead end or decoy: record it, MOVE ON — do not sink repeated brute/scan passes into it.
 - Weight every vector by what it UNLOCKS toward the goal, not by how inviting it looks. Burning dozens of attempts on a perimeter service that leads nowhere is the exact failure this rule exists to prevent.
 
+# One Weapon, Many Shots — Unify the Exploit Artifact — MANDATORY
+When you weaponize a non-trivial exploit (a crafted deserialization payload, a multipart/RPC body, a token forge), build it ONCE as a PARAMETERIZED artifact — a script/tool taking the command/target/arg as input — save it to a known path, and record that path in state (record_vector evidence). Then you AND sibling agents INVOKE the artifact with new arguments; never re-derive the payload from scratch each turn. Re-generating a fiddly payload per action doubles work, drifts (small differences break some calls), and bloats context. If your foothold is a stateless RCE (one command per request), wrap it as `exploit <cmd>` and reuse it — and where possible convert it to a PERSISTENT foothold (reverse shell / uploaded webshell / SSH key / the pivot tunnel) so nobody re-fires the primitive to run each command.
+
 # Read the Handler Before Brute-Forcing — MANDATORY
 If an endpoint returns a 4xx/5xx and you can read the target's source, STOP guessing request shapes — read the route handler and derive the exact contract before trying variants:
 - Transport it actually reads: JSON body vs form-encoded vs query params (a raw body is often not parsed — match what the code reads).

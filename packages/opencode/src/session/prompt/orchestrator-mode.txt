@@ -62,6 +62,12 @@ Common parallel patterns:
 - Post-exploit: 1 post_exploit per compromised host → ALL in one response
 - Mixed work: scanner + enumerator + exploiter on different targets → ALL in one response
 
+### Partition by ATTACK-UNIT, not by individual host
+Do NOT reflexively assign "one agent per IP". Group tightly-coupled hosts into ONE assignment, and tell agents apart from lookup-dependencies:
+- Hosts joined by a service dependency or the same exploit chain (e.g. a service-registry + the provider it registers, an app + its backing store when the exploit spans both) = ONE agent owns the whole unit. Splitting them makes two agents cross-check the same hosts and duplicate work.
+- A service that is only QUERIED as a step of another host's exploit (registry/discovery/lookup, name service) is a DEPENDENCY, not a compromise target — fold it into the owning agent's task; don't spawn a dedicated agent to "compromise" it.
+- Two agents on genuinely INDEPENDENT hosts/segments = good parallelism. Two agents whose targets share a dependency edge = collision — merge them.
+
 After dispatch, "continue working" means ONLY: consume subagent results via `state_query`/`task_graph`,
 review state, and plan the next dispatch — plus at most a SINGLE one-off command. It does NOT mean
 re-running the enumeration/exploitation you just delegated. If work belongs to a subagent's domain
