@@ -147,6 +147,41 @@ const IGNORE_DOMAINS = new Set([
   "apt.get", "pip.install", "apt.install", "pkg.get", "brew.install",
 ])
 
+// A "domain" is only treated as a real host if its final label is a plausible
+// public TLD. Without this, DOMAIN_RE matches code tokens (json.load, s.recv,
+// socket.socket, sys.stdin, foo.decode) as "hosts" and floods every python-in-bash
+// command with false out-of-scope warnings. A curated common-TLD set kills those
+// tokens (their trailing label — load/recv/socket/decode — is never a TLD) while
+// keeping genuine external targets. Exotic-TLD targets simply go un-warned; that is
+// acceptable for an advisory check and far better than warning on every method call.
+const PUBLIC_TLDS = new Set([
+  "com", "net", "org", "io", "co", "gov", "edu", "mil", "int", "biz", "info", "name", "pro",
+  "app", "dev", "cloud", "tech", "xyz", "online", "site", "web", "me", "tv", "sh", "ai", "so",
+  "uk", "us", "de", "fr", "ru", "cn", "jp", "in", "ca", "au", "br", "it", "es", "nl", "se", "no",
+  "fi", "pl", "ch", "at", "be", "dk", "cz", "eu", "asia", "kz", "ua", "kr", "hk", "sg", "za", "tr",
+])
+// Reserved / internal-use TLDs. Hosts under these are internal infrastructure — in a
+// pentest they almost always resolve to in-scope internal IPs, so warning on them is
+// pure noise. We do NOT extract them as scope-check targets (the IP-based scope + the
+// interactive gate on real external hosts cover the real cases).
+const INTERNAL_TLDS = new Set([
+  "local", "internal", "lan", "corp", "intranet", "home", "localdomain", "localhost",
+  "test", "example", "invalid", "arpa",
+])
+
+function domainTld(domain: string): string {
+  const dot = domain.lastIndexOf(".")
+  return dot < 0 ? domain : domain.slice(dot + 1)
+}
+// A hostname is worth scope-checking only if it has a real public TLD. Internal-TLD and
+// bare code-token "domains" are skipped.
+function isWarnableHost(host: string): boolean {
+  if (isIp(host) || isIpv6(host)) return true
+  const tld = domainTld(host.toLowerCase())
+  if (INTERNAL_TLDS.has(tld)) return false
+  return PUBLIC_TLDS.has(tld)
+}
+
 // .zip and .mov removed — they are real TLDs
 const FILE_EXTENSIONS = new Set([
   "txt", "html", "htm", "json", "xml", "csv", "yaml", "yml", "toml",
@@ -184,7 +219,8 @@ export function extractTargetsFromCommand(command: string): string[] {
     if (
       !IGNORE_DOMAINS.has(domain) &&
       domain.includes(".") &&
-      !looksLikeFilename(domain)
+      !looksLikeFilename(domain) &&
+      isWarnableHost(domain)
     ) {
       targets.add(domain)
     }
@@ -199,8 +235,8 @@ export function extractTargetsFromCommand(command: string): string[] {
 
   for (const match of command.matchAll(USER_AT_HOST_RE)) {
     const host = match[1]!
-    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host)) {
-      if (isIp(host) || host.includes(".")) targets.add(host)
+    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host) && isWarnableHost(host)) {
+      targets.add(host)
     }
   }
 

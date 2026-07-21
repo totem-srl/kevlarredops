@@ -631,6 +631,57 @@ export const ShellTool = Tool.define(
                 }),
               )
 
+              // Scope gate — evaluated BEFORE running the command. Genuinely-external
+              // out-of-scope targets are gated interactively: ask the operator to add
+              // them to scope (approve → added + command proceeds; deny → command not run).
+              // Chain-reachable targets (inside a discovered network segment, i.e. reached
+              // via a compromised in-scope host) are auto-in-scope — no prompt. Without an
+              // operator (no TTY) we never block or hang — warn only and proceed. free mode
+              // bypasses the whole gate.
+              let scopePrefix = ""
+              const engStatePre = yield* engStore.get()
+              if (engStatePre && engStatePre.scope.targets.length > 0 && engStatePre.mode !== "free") {
+                const { targets, warning } = ScopeMatcher.extractTargetsWithWarning(params.command)
+                const oos = targets.filter((t) => !ScopeMatcher.checkScope(t, engStatePre.scope).inScope)
+                const segments = engStatePre.network_segments ?? []
+                const external = oos.filter((t) => {
+                  const host = ScopeMatcher.extractHost(t)
+                  if (!ScopeMatcher.isIp(host)) return true // domains: can't segment-check → treat as external
+                  // chain-expansion: reached via a compromised host if inside a discovered segment
+                  return !segments.some((s) => s.cidr && ScopeMatcher.isInCidr(host, s.cidr))
+                })
+                if (external.length > 0) {
+                  const interactive = process.stdin.isTTY === true
+                  if (interactive) {
+                    const approved = yield* ctx
+                      .ask({
+                        permission: "scope",
+                        patterns: external,
+                        always: ["*"],
+                        metadata: { scopeExpansion: true, targets: external, command: params.command.slice(0, 200) },
+                      })
+                      .pipe(
+                        Effect.as(true),
+                        Effect.catch(() => Effect.succeed(false)),
+                      )
+                    if (!approved) {
+                      return {
+                        title: "Scope: blocked",
+                        metadata: { output: `blocked out-of-scope: ${external.join(", ")}`, exit: null, truncated: false },
+                        output: `Command not run: out-of-scope target(s) not approved: ${external.join(", ")}.\nApprove to add them to scope, or switch to mode=free to bypass scope checks.`,
+                      }
+                    }
+                    yield* engStore.updateScope({ targets: [...engStatePre.scope.targets, ...external] })
+                    const after = yield* engStore.get()
+                    if (after) yield* engStore.save(after)
+                    scopePrefix = `[SCOPE: added to scope by operator: ${external.join(", ")}]\n\n`
+                  } else {
+                    scopePrefix = `[SCOPE WARNING: out-of-scope target(s) — no operator to approve, not added: ${external.join(", ")}]\n\n`
+                  }
+                }
+                if (warning) scopePrefix = `[${warning}]\n\n` + scopePrefix
+              }
+
               const result = yield* run(
                 {
                   shell,
@@ -642,21 +693,7 @@ export const ShellTool = Tool.define(
                 ctx,
               )
 
-              const engState = yield* engStore.get()
-              if (engState && engState.scope.targets.length > 0 && engState.mode !== "free") {
-                const { targets, warning } = ScopeMatcher.extractTargetsWithWarning(params.command)
-                const oos = targets.filter((t) => {
-                  const r = ScopeMatcher.checkScope(t, engState.scope)
-                  return !r.inScope
-                })
-                if (oos.length > 0) {
-                  result.output = `[SCOPE WARNING: possible out-of-scope targets: ${oos.join(", ")}]\n\n` + result.output
-                }
-                if (warning) {
-                  result.output = `[${warning}]\n\n` + result.output
-                }
-              }
-
+              if (scopePrefix) result.output = scopePrefix + result.output
               return result
             }),
         }
