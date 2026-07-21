@@ -315,6 +315,25 @@ export const LiveSession = Schema.Struct({
 }).annotate({ identifier: "Engagement.LiveSession" })
 export type LiveSession = typeof LiveSession.Type
 
+// --- Artifacts (A-2 minimal): reusable exploit weapons / loot / scripts, made
+// first-class so sibling agents INVOKE a recorded weapon (path + how to call it)
+// instead of re-deriving the payload. Only metadata lives here; the file stays on
+// disk (in-container path / engagement dir). Capped, deletable. ---
+export const ArtifactType = Schema.Literals(["exploit", "loot", "script", "payload", "wordlist", "other"])
+export type ArtifactType = typeof ArtifactType.Type
+
+export const Artifact = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  path: Schema.String,
+  type: ArtifactType,
+  description: Schema.optional(Schema.String),
+  host_ip: Schema.optional(Schema.String),
+  created_at: Schema.String,
+}).annotate({ identifier: "Engagement.Artifact" })
+export type Artifact = typeof Artifact.Type
+export const ARTIFACTS_MAX = 50
+
 // --- Network Segmentation ---
 
 export const NetworkSegment = Schema.Struct({
@@ -392,6 +411,7 @@ export const State = Schema.Struct({
   live_sessions: Schema.optional(Schema.Array(LiveSession)),
   network_segments: Schema.optional(Schema.Array(NetworkSegment)),
   resolved_vectors: Schema.optional(Schema.Array(ResolvedVector)),
+  artifacts: Schema.optional(Schema.Array(Artifact)),
   pause_on_finding: Schema.optional(PauseBehavior),
   current_phase: PentestPhase,
   mode: PentestMode,

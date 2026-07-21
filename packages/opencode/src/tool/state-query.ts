@@ -31,9 +31,10 @@ export const Parameters = Schema.Struct({
     "wordlists",
     "resolved_vectors",
     "subagents",
+    "artifacts",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), resolved_vectors (settled attack vectors — check before opening a vector; filter by status attempted|confirmed|resolved|blocked or a target substring), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), resolved_vectors (settled attack vectors — check before opening a vector; filter by status attempted|confirmed|resolved|blocked or a target substring), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status), artifacts (reusable weapons/loot/scripts recorded this engagement — INVOKE a recorded exploit instead of re-deriving its payload)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -470,6 +471,17 @@ export const StateQueryTool = Tool.define(
                 metadata: { count: active.length },
                 output: `Active alerts (${active.length}):\n\n${lines.join("\n\n")}`,
               }
+            }
+
+            case "artifacts": {
+              const arts = state.artifacts ?? []
+              if (arts.length === 0) {
+                return { title: "Artifacts", metadata: { count: 0 }, output: "No artifacts recorded. Save reusable weapons/loot/scripts with state_update (action: record_artifact) so agents INVOKE them instead of re-deriving payloads." }
+              }
+              const f = params.filter?.toLowerCase()
+              const shown = f ? arts.filter((a) => a.name.toLowerCase().includes(f) || a.type.toLowerCase().includes(f) || (a.host_ip ?? "").includes(f)) : arts
+              const lines = shown.map((a) => `  [${a.type.toUpperCase()}] ${a.name} @ ${a.path}${a.host_ip ? ` (${a.host_ip})` : ""}${a.description ? `\n    ${a.description}` : ""}`)
+              return { title: "Artifacts", metadata: { count: shown.length }, output: `Recorded artifacts (INVOKE these, don't re-derive):\n${lines.join("\n")}` }
             }
 
             case "sessions": {

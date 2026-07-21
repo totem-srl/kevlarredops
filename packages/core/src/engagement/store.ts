@@ -98,6 +98,8 @@ export interface Interface {
   readonly addAlert: (alert: EngagementSchema.Alert) => Effect.Effect<void>
   readonly acknowledgeAlert: (id: string) => Effect.Effect<boolean>
   readonly getActiveAlerts: () => Effect.Effect<EngagementSchema.Alert[]>
+  // Artifacts (reusable weapons / loot / scripts)
+  readonly addArtifact: (artifact: EngagementSchema.Artifact) => Effect.Effect<void>
   // Live Sessions
   readonly addLiveSession: (session: EngagementSchema.LiveSession) => Effect.Effect<void>
   readonly updateLiveSession: (id: string, patch: Record<string, unknown>) => Effect.Effect<boolean>
@@ -772,6 +774,23 @@ const layer = Layer.effect(
         } else {
           yield* Ref.set(stateRef, { ...current, live_sessions: [...existing, session] })
           yield* logChange("add_session", "live_session", session.id, `${session.session_type} on ${session.host_ip}${session.port ? `:${session.port}` : ""} as ${session.username ?? "?"}`)
+        }
+      }),
+
+      addArtifact: Effect.fn("EngagementStore.addArtifact")(function* (artifact) {
+        const current = yield* Ref.get(stateRef)
+        if (!current) return
+        const existing = current.artifacts ?? []
+        // dedup by id OR path — a weapon at a given path is the same artifact
+        const idx = existing.findIndex((a) => a.id === artifact.id || a.path === artifact.path)
+        if (idx !== -1) {
+          const updated = [...existing]
+          updated[idx] = { ...updated[idx]!, ...artifact }
+          yield* Ref.set(stateRef, { ...current, artifacts: updated })
+        } else {
+          const next = [...existing, artifact].slice(-EngagementSchema.ARTIFACTS_MAX)
+          yield* Ref.set(stateRef, { ...current, artifacts: next })
+          yield* logChange("add_artifact", "artifact", artifact.id, `${artifact.type}: ${artifact.name} @ ${artifact.path}`)
         }
       }),
 

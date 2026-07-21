@@ -41,6 +41,7 @@ export const Parameters = Schema.Struct({
     "add_live_session",
     "update_live_session",
     "remove_live_session",
+    "record_artifact",
     "add_network_segment",
     "update_network_segment",
     "remove_network_segment",
@@ -905,13 +906,55 @@ export const StateUpdateTool = Tool.define(
             }
 
             // --- Live Sessions ---
+            case "record_artifact": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const name = d.name as string
+              const path = d.path as string
+              if (!name || !path) {
+                return { title: "Error", metadata: {}, output: "Error: data.name and data.path required. Record a reusable weapon/loot/script (path + how to invoke it) so other agents INVOKE it instead of re-deriving the payload." }
+              }
+              const ARTIFACT_TYPES = ["exploit", "loot", "script", "payload", "wordlist", "other"]
+              const artType = ARTIFACT_TYPES.includes(d.type as string) ? (d.type as string) : "other"
+              const artifact = {
+                id: (d.id as string) || `art-${Date.now()}`,
+                name,
+                path,
+                type: artType as EngagementSchema.ArtifactType,
+                description: d.description as string | undefined,
+                host_ip: d.host_ip as string | undefined,
+                created_at: new Date().toISOString(),
+              }
+              yield* store.addArtifact(artifact)
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              return {
+                title: `Artifact: ${name}`,
+                metadata: { id: artifact.id, type: artType, path },
+                output: `Artifact recorded [${artifact.id}]: ${artType} '${name}' @ ${path}${d.description ? ` — ${d.description}` : ""}. Reuse it (invoke, don't re-derive).`,
+              }
+            }
+
             case "add_live_session": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
-              const sessionType = d.session_type as string
+              const rawType = d.session_type as string
               const hostIp = d.host_ip as string
-              if (!sessionType || !hostIp) {
-                return { title: "Error", metadata: {}, output: "Error: data.session_type (shell|meterpreter|tunnel|listener|proxy) and data.host_ip are required." }
+              if (!rawType || !hostIp) {
+                return { title: "Error", metadata: {}, output: "Error: data.session_type (shell|listener|tunnel|socks_proxy|port_forward) and data.host_ip are required." }
+              }
+              // Normalize common aliases → schema enum (SessionType in schema.ts), then
+              // validate at add-time. Prevents an invalid value corrupting state and
+              // throwing at save (e.g. the model naturally writes "proxy" for socks_proxy).
+              const SESSION_ALIASES: Record<string, string> = {
+                proxy: "socks_proxy", socks: "socks_proxy", socks5: "socks_proxy", socks5_proxy: "socks_proxy",
+                meterpreter: "shell", reverse_shell: "shell", revshell: "shell", webshell: "shell", rce: "shell",
+                forward: "port_forward", portfwd: "port_forward", "port-forward": "port_forward",
+              }
+              const VALID_SESSION_TYPES = ["shell", "listener", "tunnel", "socks_proxy", "port_forward"]
+              const sessionType = SESSION_ALIASES[rawType.toLowerCase()] ?? rawType.toLowerCase()
+              if (!VALID_SESSION_TYPES.includes(sessionType)) {
+                return { title: "Error", metadata: {}, output: `Error: session_type '${rawType}' is invalid. Use one of: ${VALID_SESSION_TYPES.join("|")} (aliases accepted: proxy→socks_proxy, meterpreter/webshell/rce→shell, portfwd→port_forward).` }
               }
               const session = {
                 id: d.id as string || `sess-${Date.now()}`,
