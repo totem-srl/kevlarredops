@@ -232,3 +232,69 @@ describe("Orchestrator — premature completion cannot be decided by the harness
     expect(Orchestrator.hasOutstandingWork(running)).toBe(true)
   })
 })
+
+describe("Orchestrator.detectStall — A-4 stall watchdog (DAG-deadlock guard)", () => {
+  const BASE = Date.parse("2026-07-15T00:00:00.000Z")
+  const at = (offsetMs: number) => new Date(BASE + offsetMs).toISOString()
+
+  test("emits a running task older than stallMs with a starved (planned) dependent", () => {
+    const g = graph(
+      node({ id: "pivot", status: "running", updatedAt: at(0) }),
+      node({ id: "exploit", status: "planned", dependsOn: ["pivot"], assignedAgent: "exploiter" }),
+    )
+    const stalls = Orchestrator.detectStall(g, { stallMs: 300_000, nowMs: BASE + 400_000 })
+    expect(stalls).toHaveLength(1)
+    expect(stalls[0]!.stalled.id).toBe("pivot")
+    expect(stalls[0]!.starvedDependents.map((d) => d.id)).toEqual(["exploit"])
+    expect(stalls[0]!.ageMs).toBe(400_000)
+  })
+
+  test("dispatched (not yet running) also counts as in-flight", () => {
+    const g = graph(
+      node({ id: "pivot", status: "dispatched", updatedAt: at(0) }),
+      node({ id: "exploit", status: "planned", dependsOn: ["pivot"] }),
+    )
+    expect(Orchestrator.detectStall(g, { stallMs: 300_000, nowMs: BASE + 400_000 })).toHaveLength(1)
+  })
+
+  test("does NOT emit before stallMs elapses", () => {
+    const g = graph(
+      node({ id: "pivot", status: "running", updatedAt: at(0) }),
+      node({ id: "exploit", status: "planned", dependsOn: ["pivot"] }),
+    )
+    expect(Orchestrator.detectStall(g, { stallMs: 300_000, nowMs: BASE + 100_000 })).toHaveLength(0)
+  })
+
+  test("does NOT emit for a long-running task with NO dependents (no false wake)", () => {
+    const g = graph(node({ id: "scan", status: "running", updatedAt: at(0) }))
+    expect(Orchestrator.detectStall(g, { stallMs: 300_000, nowMs: BASE + 999_000 })).toHaveLength(0)
+  })
+
+  test("ignores non-in-flight tasks (completed/ready)", () => {
+    const g = graph(
+      node({ id: "done", status: "completed", updatedAt: at(0) }),
+      node({ id: "dep", status: "planned", dependsOn: ["done"] }),
+    )
+    // 'done' completed -> 'dep' becomes ready via computeReadiness; nothing in-flight
+    expect(Orchestrator.detectStall(g, { stallMs: 1, nowMs: BASE + 999_000 })).toHaveLength(0)
+  })
+
+  test("a dependent that is not planned/blocked is not counted as starved", () => {
+    const g = graph(
+      node({ id: "pivot", status: "running", updatedAt: at(0) }),
+      node({ id: "exploit", status: "completed", dependsOn: ["pivot"] }),
+    )
+    expect(Orchestrator.detectStall(g, { stallMs: 300_000, nowMs: BASE + 400_000 })).toHaveLength(0)
+  })
+
+  test("counts a blocked dependent and sorts multiple stalls oldest-first", () => {
+    const g = graph(
+      node({ id: "old", status: "running", updatedAt: at(0) }),
+      node({ id: "recent", status: "running", updatedAt: at(200_000) }),
+      node({ id: "d1", status: "planned", dependsOn: ["recent"] }),
+      node({ id: "d2", status: "blocked", dependsOn: ["old"] }),
+    )
+    const stalls = Orchestrator.detectStall(g, { stallMs: 100_000, nowMs: BASE + 500_000 })
+    expect(stalls.map((s) => s.stalled.id)).toEqual(["old", "recent"]) // oldest (age 500k) first
+  })
+})

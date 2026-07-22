@@ -59,6 +59,12 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   // unaffected — the rolling pump refills slots on every settle regardless.
   // undefined -> code default (1500). Set very low to approximate per-completion.
   orchestratorCoalesceMs: positiveInteger("OPENCODE_ORCHESTRATOR_COALESCE_MS"),
+  // Stall watchdog: an in-flight task (dispatched/running) that has run longer
+  // than this (ms) WHILE tasks depend on it and cannot start wakes the coordinator
+  // to decide (kill/complete/re-plan). Guards against a subagent that never returns
+  // stranding its dependents forever (the DAG-deadlock). undefined -> code default
+  // (300000 = 5min). Lower it for fast-iterating benches.
+  orchestratorStallMs: positiveInteger("OPENCODE_ORCHESTRATOR_STALL_MS"),
   // Max concurrent main-model LLM streams per provider (coordinator + subagents).
   // Caps outbound concurrency so a fan-out doesn't saturate the provider into
   // 429/529 overloads. undefined -> code default. Small-model (offload/title)

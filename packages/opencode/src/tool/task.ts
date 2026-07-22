@@ -47,6 +47,7 @@ const BACKGROUND_UPDATED = "Context sent to the running background task — you'
 const CONTEXT_PROTOCOL = [
   "<context-protocol>",
   "Your engagement state (hosts, confirmed vulns, credentials, already-tested vectors) is shared and visible to you. Before acting, query it with state_query. Do NOT re-test or re-report anything already confirmed in state, and do NOT expect findings/creds/tokens to be pasted into this prompt — pull them yourself. Record every new finding immediately via state_update / the parser tools.",
+  "SCOPE: complete your PRIMARY deliverable and RETURN — do not open-endedly expand. When you uncover follow-on work (a new segment/host/vector, deeper exhaustion), record it via state_update and list it under `next:` for the coordinator to plan as its own task; do NOT chase it yourself. Other tasks may DEPEND on you — they stay blocked until you return, so returning promptly after your deliverable is met is part of the job.",
   "END your FINAL message with this machine-read result block so your work is filed accurately for the coordinator and later agents (this is parsed verbatim — do not rely on prose being interpreted):",
   "<agent-result>",
   "findings: confirmed facts you established — vulns/creds/access/live hosts+services; one per '|', or 'none'",
@@ -246,6 +247,29 @@ function formatInterruptAlert(alert: EngagementSchema.Alert): string {
   ].join("\n")
 }
 
+// A-4 stall watchdog wake. The harness DETECTS a gating task that has run too
+// long with starved dependents and wakes the coordinator to DECIDE (it never
+// resolves the stall itself — harness computes, coordinator decides). Modeled on
+// formatInterruptAlert; injected via the same synthetic-prompt path.
+function formatStalledTask(stall: Orchestrator.Stall): string {
+  const mins = Math.floor(stall.ageMs / 60_000)
+  const age = mins >= 1 ? `${mins} min` : `${Math.floor(stall.ageMs / 1_000)}s`
+  const deps = stall.starvedDependents
+    .map((d) => `${d.id}${d.assignedAgent ? `→${d.assignedAgent}` : ""}`)
+    .join(", ")
+  const id = stall.stalled.id
+  return [
+    `<stalled-task task="${id}" running="${age}">`,
+    `Task "${id}"${stall.stalled.assignedAgent ? ` (${stall.stalled.assignedAgent})` : ""} has been in flight for ${age} and has NOT returned. ${stall.starvedDependents.length} task(s) depend on it and CANNOT start until it does: ${deps}.`,
+    `A subagent that never returns strands its dependents forever. DECIDE now (do not just wait):`,
+    `- task_graph kill {"data":{"id":"${id}"}} — if it is stuck/looping/chasing a dead end (hard-stops it, reclaims tokens).`,
+    `- task_graph complete {"data":{"id":"${id}","result":"..."}} — if its deliverable is ALREADY met (verify via state_query, e.g. the tunnel/live_session is up), so its dependents launch immediately.`,
+    `- task_graph plan {"tasks":[...]} — re-scope: move its open-ended follow-on work into a NEW task so this gate can close.`,
+    `- Do nothing ONLY if it is legitimately still working and its dependents can afford to wait.`,
+    `</stalled-task>`,
+  ].join("\n")
+}
+
 // Compact objective prompt for an orchestrated node. Heavy context-carry
 // (CONTEXT_PROTOCOL, prior/other-agent work) is prepended by the spawner, so
 // this stays lean — objectives, not scripts.
@@ -291,6 +315,10 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
   const cap = flags.orchestratorConcurrency ?? Orchestrator.DEFAULT_CONCURRENCY
   const staggerMs = flags.orchestratorStaggerMs ?? 800
   const pumpLock = Semaphore.makeUnsafe(1)
+  // A-4 stall watchdog: an in-flight task older than stallMs WITH starved
+  // dependents wakes the coordinator. stallCheckMs is the poll cadence.
+  const stallMs = flags.orchestratorStallMs ?? 300_000
+  const stallCheckMs = Math.max(15_000, Math.floor(stallMs / 2))
 
   // REAL in-flight count from the background-job registry — the source of truth
   // for free slots (graph status can lag).
@@ -316,6 +344,14 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
   type Settled = { ctx: Tool.Context; variant: string | undefined; childId: string; description: string; status: "completed" | "error"; text: string }
   const pendingInjects = yield* Ref.make<Settled[]>([])
   const flushScheduled = yield* Ref.make(false)
+
+  // A-4 stall-watchdog state. The spawner is a process singleton, so the watchdog
+  // is a single fiber lazily started on the first pump; it reads the latest
+  // coordinator ctx (for the wake path) from a Ref. `stallAlerted` dedups so each
+  // stall episode wakes the coordinator once (re-armed when a task stops stalling).
+  const watchdogStarted = yield* Ref.make(false)
+  const lastCoordinatorCtx = yield* Ref.make<Tool.Context | undefined>(undefined)
+  const stallAlerted = yield* Ref.make<Set<string>>(new Set())
 
   const flushBatch = (batch: Settled[]) =>
     Effect.gen(function* () {
@@ -549,10 +585,56 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
       }).pipe(Effect.interruptible, Effect.forkIn(scope, { startImmediately: true }))
     })
 
+  // A-4 stall watchdog. Every stallCheckMs, wake the coordinator ONCE per stall
+  // episode for any in-flight task that has run > stallMs while dependents starve.
+  // It only DETECTS + WAKES; the coordinator decides (kill/complete/re-plan). A
+  // wake failure must never kill the fiber, so injects are swallowed.
+  const watchdogLoop = Effect.gen(function* () {
+    while (true) {
+      yield* Effect.sleep(`${stallCheckMs} millis`)
+      const ctx = yield* Ref.get(lastCoordinatorCtx)
+      if (!ctx) continue
+      const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
+      if (!ops) continue
+      const graph = yield* engagementStore.getTaskGraph()
+      const stalls = Orchestrator.detectStall(graph, { stallMs, nowMs: Date.now() })
+      // Re-arm: drop alerts for tasks that are no longer stalled so a genuine
+      // re-stall alerts once more; keep only still-stalled ids.
+      const stalledIds = new Set(stalls.map((s) => s.stalled.id))
+      yield* Ref.update(stallAlerted, (set) => new Set([...set].filter((id) => stalledIds.has(id))))
+      const alerted = yield* Ref.get(stallAlerted)
+      for (const stall of stalls) {
+        if (alerted.has(stall.stalled.id)) continue
+        yield* Ref.update(stallAlerted, (set) => new Set(set).add(stall.stalled.id))
+        const currentParent = yield* sessions.get(ctx.sessionID)
+        yield* ops
+          .prompt({
+            sessionID: ctx.sessionID,
+            agent: currentParent.agent ?? ctx.agent,
+            variant: undefined,
+            parts: [{ type: "text", synthetic: true, text: formatStalledTask(stall) }],
+          })
+          .pipe(Effect.ignore)
+      }
+    }
+  }).pipe(Effect.catchCause(() => Effect.void))
+
+  // Record the latest coordinator ctx (for the wake path) and lazily start the
+  // single watchdog fiber on the first pump. Orchestrator-gated.
+  const startWatchdog = (ctx: Tool.Context) =>
+    Effect.gen(function* () {
+      yield* Ref.set(lastCoordinatorCtx, ctx)
+      if (!flags.experimentalOrchestrator) return
+      const already = yield* Ref.getAndSet(watchdogStarted, true)
+      if (already) return
+      yield* watchdogLoop.pipe(Effect.interruptible, Effect.forkIn(scope, { startImmediately: true }))
+    })
+
   // Fill free slots with ready tasks (deps satisfied), paced + serialized.
   const pump = (ctx: Tool.Context): Effect.Effect<PumpResult> =>
     pumpLock.withPermits(1)(
       Effect.gen(function* () {
+        yield* startWatchdog(ctx)
         const cur = yield* engagementStore.get()
         const resolvedVectors = cur?.resolved_vectors ?? []
         const graph = yield* engagementStore.getTaskGraph()

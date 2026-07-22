@@ -146,3 +146,45 @@ export function hasOutstandingWork(graph: TaskGraph.TaskNodes): boolean {
   const s = waveStatus(graph)
   return s.inFlight.length > 0 || s.ready.length > 0 || s.blocked.length > 0
 }
+
+export interface Stall {
+  /** The in-flight (dispatched/running) task that has run too long. */
+  stalled: TaskGraph.TaskNode
+  /** Tasks that cannot start because they depend on the stalled task. */
+  starvedDependents: TaskGraph.TaskNode[]
+  /** How long the stalled task has been in flight (ms), from its updatedAt. */
+  ageMs: number
+}
+
+/**
+ * A subagent task only completes (and thus unblocks its dependents) when its
+ * background job settles — a subagent that scope-creeps into open-ended work and
+ * never returns leaves its dependents `planned`/`blocked` FOREVER, and because
+ * something is still "in flight" the wave is never `quiescent`, so the coordinator
+ * is never woken. This is the DAG-deadlock we saw in the field (a pivot task that
+ * never returned stranded exploit-dubbo/exploit-cacti).
+ *
+ * `detectStall` finds those cases so the HARNESS can WAKE the coordinator — it does
+ * NOT resolve them (honoring the module invariant: harness computes, coordinator
+ * decides). Pure: `nowMs` is supplied by the caller.
+ *
+ * A task counts as stalled only when (a) it is in flight (dispatched|running),
+ * (b) it has been so for at least `stallMs` (its `updatedAt` is set at dispatch and
+ * is NOT bumped while running — `computeReadiness` skips non-planned/blocked nodes),
+ * AND (c) at least one `planned`/`blocked` task depends on it. Condition (c) scopes
+ * wakes to the HARMFUL case: an independent long-running task with no dependents is
+ * left alone (no false wake). Sorted oldest-first.
+ */
+export function detectStall(graph: TaskGraph.TaskNodes, opts: { stallMs: number; nowMs: number }): Stall[] {
+  const stalls: Stall[] = []
+  for (const node of TaskGraph.getRunning(graph)) {
+    const ageMs = opts.nowMs - Date.parse(node.updatedAt)
+    if (!Number.isFinite(ageMs) || ageMs < opts.stallMs) continue
+    const starvedDependents = Object.values(graph).filter(
+      (t) => (t.status === "planned" || t.status === "blocked") && t.dependsOn.includes(node.id),
+    )
+    if (starvedDependents.length === 0) continue
+    stalls.push({ stalled: node, starvedDependents, ageMs })
+  }
+  return stalls.sort((a, b) => b.ageMs - a.ageMs)
+}

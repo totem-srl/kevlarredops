@@ -60,6 +60,7 @@ import { LLMEvent } from "@pentestcode/llm"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import { TaskGraph } from "@pentestcode/core/engagement/task-graph"
+import { Orchestrator } from "@pentestcode/core/engagement/orchestrator"
 import { BackgroundJob } from "@/background/job"
 import ORCHESTRATOR_MODE from "./prompt/orchestrator-mode.txt"
 
@@ -1468,6 +1469,25 @@ const layer = Layer.effect(
                           .map((t) => t.id)
                           .join(", ")}). Call task_graph plan with NO new tasks NOW to launch this wave. Do not poll or wait.`,
                       )
+                    }
+                    // A-4 in-context stall surface (belt-and-suspenders to the active
+                    // watchdog wake, which can race a turn boundary): a gating task
+                    // that has run too long while dependents starve — the coordinator
+                    // must kill/complete/re-plan so its dependents can launch.
+                    if (flags.experimentalOrchestrator) {
+                      const stalls = Orchestrator.detectStall(taskGraph, {
+                        stallMs: flags.orchestratorStallMs ?? 300_000,
+                        nowMs: Date.now(),
+                      })
+                      for (const s of stalls) {
+                        const mins = Math.floor(s.ageMs / 60_000)
+                        const age = mins >= 1 ? `${mins}min` : `${Math.floor(s.ageMs / 1_000)}s`
+                        lines.push(
+                          `  ⚠ STALLED — ${s.stalled.id} has run ${age} and has NOT returned; ${s.starvedDependents.length} dependent(s) blocked: ${s.starvedDependents
+                            .map((d) => d.id)
+                            .join(", ")}. Decide NOW: task_graph kill (stuck), complete (deliverable already met — verify via state_query), or plan to re-scope. Do NOT leave dependents stranded.`,
+                        )
+                      }
                     }
                     lines.push("</task-graph>")
                   }
