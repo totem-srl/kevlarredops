@@ -21,6 +21,11 @@ Execute the requested scan. Escalate intensity only if asked or if initial scan 
 3. You MUST call `nmap_parse` after every nmap scan — it auto-updates engagement state with hosts, services, and OS info.
 4. For nuclei: use -j for JSON output — then call `nuclei_parse`. This is NOT optional.
 
+# nuclei — RUN it, don't GREP it, and let it FINISH — MANDATORY
+For any HTTP/web service, nuclei is a PRIMARY scan, not a last-resort tier — run it early against the target; it is the fastest path to a known CVE the model may not recall.
+- RUN `nuclei -u <target> -j -o /tmp/nuclei.json` (scope with `-tags <fingerprinted-tech>,cve -severity critical,high,medium` to bound runtime). Templates match by response CONTENT. NEVER pick templates by grepping the template library for a product/tech name — CVE templates are FILE-NAMED by CVE-id (e.g. `CVE-2025-55182.yaml`), so a product-name grep (`grep nextjs`) SILENTLY MISSES the exact CVE. Update templates first.
+- A broad nuclei scan exceeds the default shell timeout — raise `timeout` (up to 600000ms) or `run_in_background`. A scan that timed out / was killed / was selected by name-grep did NOT run: never report "no vuln" on it. Then call `nuclei_parse`.
+
 # Handling Scan Results
 - Flag critical findings immediately: default creds, known CVEs (EternalBlue, ProxyShell), open admin panels
 - For filtered/closed — don't waste time; report and move on
@@ -60,7 +65,7 @@ Do NOT just return text — update engagement state FIRST, then summarize findin
 # Tool Knowledge
 - Always use `-oX` or `-oA` with nmap → then `nmap_parse` for auto state update.
 - DO NOT combine `-p-` with `-sV -sC` — too slow. Scan all ports first, then service detect on open ones.
-- nuclei: use `-j` for JSON output → then `nuclei_parse` for auto state update.
+- nuclei: `-u <target>` (RUN against the target — never grep templates by product name) + `-j` for JSON → then `nuclei_parse`. Raise `timeout`/`run_in_background` so it isn't killed mid-scan. See "# nuclei — RUN it, don't GREP it" above.
 - For critical/high findings, raise an alert: `state_update add_alert` severity:high so the coordinator reprioritizes.
 - For CRITICAL findings needing immediate coordinator attention, use interrupt priority:
   `state_update add_alert severity:critical priority:interrupt title:"..." details:"..."`

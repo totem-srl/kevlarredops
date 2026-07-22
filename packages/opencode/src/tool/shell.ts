@@ -347,7 +347,13 @@ export const ShellTool = Tool.define(
     const plugin = yield* Plugin.Service
     const flags = yield* RuntimeFlags.Service
     const engStore = yield* EngagementStore.Service
-    const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000
+    // Pentest default: scans (nuclei/nmap -p-/ffuf/sqlmap) routinely run several
+    // minutes, so the upstream 2min coding default was killing them mid-run and
+    // pushing the agent into wrong shortcuts (e.g. grepping the nuclei template lib
+    // by product name instead of running the scan). 5min fits scoped scans; the
+    // agent still raises per-command (up to 600000ms) for a broad sweep.
+    // Override via OPENCODE_BASH_DEFAULT_TIMEOUT_MS.
+    const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 5 * 60 * 1000
 
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
       const lines = yield* spawner
