@@ -1492,6 +1492,46 @@ const layer = Layer.effect(
                     lines.push("</task-graph>")
                   }
 
+                  // batch-4 (B+C): surface REACHED-but-unattacked hosts — open
+                  // services, no access yet, and no active task working them. These
+                  // are the cheapest remaining markers; showing them (plus a spray
+                  // reminder for harvested creds) fixes both the "harvested a DB root
+                  // but never applied it" gap and the "sank budget into one hard host
+                  // while a reached one sat idle" gap. Coordinator-only.
+                  if (isCoordinator) {
+                    const ACTIVE = new Set(["planned", "ready", "dispatched", "running"])
+                    const targeted = Object.values(taskGraph)
+                      .filter((t) => ACTIVE.has(t.status) && t.target)
+                      .map((t) => t.target as string)
+                    const reachedNotAttacked = Object.values(state.hosts).filter((h) => {
+                      const hasOpen = (h.services ?? []).some((s) => !s.state || s.state === "open")
+                      const noAccess = (h.access ?? []).length === 0
+                      const hasTask = targeted.some((tgt) => tgt.includes(h.ip))
+                      return hasOpen && noAccess && !hasTask
+                    })
+                    if (reachedNotAttacked.length > 0) {
+                      const credCount = Object.keys(state.credentials ?? {}).length
+                      lines.push(
+                        "",
+                        "<reachable-not-yet-attacked>",
+                        `${reachedNotAttacked.length} reached host(s) have OPEN services, NO access yet, and NO task working them — your CHEAPEST remaining markers. Plan these BEFORE pouring more budget into a host that is already grinding (2+ re-dispatches / a subagent that hit its step cap = STOP, bank these first, return later):`,
+                      )
+                      for (const h of reachedNotAttacked.slice(0, 15)) {
+                        const svc = (h.services ?? [])
+                          .map((s) => `${s.port}/${s.service ?? "?"}`)
+                          .slice(0, 6)
+                          .join(",")
+                        lines.push(`  - ${h.ip}${h.hostname ? ` (${h.hostname})` : ""}: ${svc}`)
+                      }
+                      if (credCount > 0) {
+                        lines.push(
+                          `You hold ${credCount} harvested credential(s). SPRAY them against these services NOW — every DB/admin root and the Range<Service>@2026 pattern against every reachable same-class service. A reached service that accepts a harvested cred is a free marker; do not leave it unattacked.`,
+                        )
+                      }
+                      lines.push("</reachable-not-yet-attacked>")
+                    }
+                  }
+
                   if (liveJobs.length > 0) {
                     lines.push("", "<live-subagents>", "REAL subagent processes this session (trust this over task-graph status):")
                     if (liveRunning.length > 0) {

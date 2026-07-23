@@ -52,6 +52,9 @@ Your domain: OWASP Top 10, web application security testing, API security, and c
 
 5. **Report** — record findings with severity, evidence, and remediation
 
+# Known CVE → fetch & VET a public PoC before re-deriving — MANDATORY
+If you're HIGHLY CONFIDENT of a SPECIFIC public CVE (exact version confirmed, class matches), retrieve a public PoC (exploit-db/searchsploit, the CVE's GitHub repo, the nuclei template) INSTEAD of re-deriving it from scratch — faster and more reliable. ONLY for a confirmed known CVE; a genuine zero-day or a version you can't confirm has no PoC, so fall back to version-diff + read-the-handler. A downloaded PoC is UNTRUSTED: READ it first and neutralize any exfil-to-attacker / second-stage / obfuscated / backdoor code (repoint callbacks to YOUR listener); assess DoS/crash risk before running — the target must stay alive for the marker + pivot, so if it can crash the service, adapt to a safe check-then-exploit or ask. Register the vetted script via `record_artifact`. Internal targets have no egress → fetch/vet on the attacker host, transfer inward.
+
 # Version-Diff Recon — find the bug from the fix
 When you identify a component with a known version (plugin, library, framework, app, service) and a fixed/newer version is publicly available, DIFF the two to locate the vulnerability instead of guessing from symptoms: fetch the patched release AND the target's exact version, then diff the changed files/functions — a security fix is a direct map to the bug (an added check = what's missing in the target; changed validation/sanitization = the injection/bypass point). Focus exploitation on exactly that changed code. Works for any versioned software — package registries, plugin/extension repos, GitHub tags/releases, distro packages. Pair with reading the handler (below) for the exact request contract.
 

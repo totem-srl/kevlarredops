@@ -151,7 +151,7 @@ const layer = Layer.effect(
           pentest: {
             name: "pentest",
             description: "Primary pentesting agent. Plans and executes attacks within scope.",
-            steps: 200,
+            steps: 300,
             options: {},
             permission: Permission.merge(
               defaults,
@@ -211,7 +211,7 @@ const layer = Layer.effect(
               user,
             ),
             prompt: PROMPT_RECON,
-            steps: 200,
+            steps: 300,
             mode: "primary",
             native: true,
           },
@@ -246,7 +246,7 @@ const layer = Layer.effect(
           },
           enumerator: {
             name: "enumerator",
-            steps: 100,
+            steps: 150,
             description: `Deep service enumeration subagent. Specializes in thorough enumeration of specific services (SMB shares, LDAP trees, web directories, database schemas, etc.). One per service.`,
             permission: Permission.merge(
               defaults,
@@ -273,7 +273,7 @@ const layer = Layer.effect(
           },
           exploiter: {
             name: "exploiter",
-            steps: 100,
+            steps: 250,
             description: `Exploitation subagent. Attempts to exploit a specific confirmed vulnerability. Isolated context to prevent cross-contamination between exploit attempts.`,
             permission: Permission.merge(
               defaults,
@@ -324,7 +324,7 @@ const layer = Layer.effect(
           },
           identity: {
             name: "identity",
-            steps: 100,
+            steps: 150,
             description: `Identity & Access specialist. AD, LDAP, Kerberos, IAM, NTLM, certificate-based auth attacks.`,
             permission: Permission.merge(
               defaults,
@@ -350,7 +350,7 @@ const layer = Layer.effect(
           },
           infrastructure: {
             name: "infrastructure",
-            steps: 100,
+            steps: 150,
             description: `Infrastructure specialist. Network services, SNMP, IPMI, RDP, SSH, FTP, databases, misconfigurations.`,
             permission: Permission.merge(
               defaults,
@@ -381,7 +381,7 @@ const layer = Layer.effect(
           },
           post_exploit: {
             name: "post_exploit",
-            steps: 100,
+            steps: 250,
             description: `Post-exploitation specialist. Lateral movement, privilege escalation, persistence, credential harvesting, pivoting.`,
             permission: Permission.merge(
               defaults,
@@ -410,7 +410,7 @@ const layer = Layer.effect(
           },
           exploit_dev: {
             name: "exploit_dev",
-            steps: 100,
+            steps: 250,
             description: `Exploit development specialist. Custom exploits, payload generation, PoC development, bypass techniques.`,
             permission: Permission.merge(
               defaults,
@@ -455,7 +455,7 @@ const layer = Layer.effect(
           },
           webapp: {
             name: "webapp",
-            steps: 100,
+            steps: 150,
             description: `Web application specialist. OWASP Top 10, API security, XSS, SQLi, SSRF, authentication flaws.`,
             permission: Permission.merge(
               defaults,

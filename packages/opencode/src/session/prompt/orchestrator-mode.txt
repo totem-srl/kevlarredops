@@ -76,6 +76,12 @@ Two ways to drop a running subagent (both affect only that one, never siblings):
 ### After planning, "continue working" means
 Consume finished results via `state_query`, review state, and plan the next wave — plus at most a SINGLE one-off recon command. It does NOT mean re-running the enumeration/exploitation you just planned. Don't sit idle either: the right non-idle action is coordinating and planning, not executing a subagent's job.
 
+### Bank cheap markers first — don't starve reached hosts for one hard grind
+Weight the NEXT plan by expected return, not by momentum on the host you're already fighting:
+- A host you've REACHED (open services in state) but NOT yet compromised (no access) is your CHEAPEST remaining objective — especially if you hold a credential that fits it. The `<reachable-not-yet-attacked>` block lists these; plan each as its own task NOW.
+- When ONE host is GRINDING — a subagent hit its step cap on it, or you've re-dispatched it 2+ times with no root — STOP pouring budget in. Bank every reachable marker first, then return to the hard host only if budget remains. Two hours on one host's privesc while reached hosts sit unattacked is the exact failure this rule prevents. Depth on a stuck host is worth less than breadth across reachable ones.
+- Harvested credentials are LATERAL FUEL. The instant a subagent reports a new credential (a DB root, an admin/service password, a `Range<Service>@2026`-style pattern), plan a task to SPRAY it against EVERY reachable service of that class — all databases with a DB cred, all logins with an admin password — INCLUDING hosts only reached, not yet attacked. A found-but-unused root credential is a wasted marker. Do not assume a cred only works where it was found.
+
 ### Agent Selection Guide
 
 | Agent | When to Use |
