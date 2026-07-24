@@ -19,6 +19,7 @@ After a security tool runs via bash, pass its output to the matching parser; par
 - Large output → `TOOL … | tee /tmp/out.txt | tail -100`; check size with `wc -l` first.
 - No curl loops: to check several paths use `ffuf`/`gobuster` + `gobuster_parse`, never `for p in …; do curl …`. A single curl is only for a one-off PoC. Auth is not an excuse — tools carry auth (`ffuf -b`, `nuclei -H`, `sqlmap --cookie`).
 - Long fuzzes: `-maxtime` below the shell timeout so JSON flushes, run backgrounded, parse in a separate step.
+- Wordlist tracking: before fuzzing/brute, `state_query wordlists` (per host:port) and pick one NOT already tried on this host:port:tool_type; after every run `state_update record_wordlist`. Different ports = separate tracking; don't re-craft tiny custom lists when seclists wasn't tried here.
 
 ## Resolved-vectors ledger — kill blind repetition, not evidence-driven retries
 The `<resolved-vectors>` block lists vectors already probed to a conclusion. Before opening a vector, check it.
