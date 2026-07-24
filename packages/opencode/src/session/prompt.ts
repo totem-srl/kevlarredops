@@ -1551,25 +1551,16 @@ const layer = Layer.effect(
                     }
                     lines.push("</live-subagents>")
                   }
-                  const decisions = yield* engagement.getDecisions(10)
-                  if (decisions.length > 0) {
-                    const failed = decisions.filter((dec) => dec.outcome === "failed")
-                    const succeeded = decisions.filter((dec) => dec.outcome === "successful")
+                  // P3: only the actionable failure-escalation stays in the volatile
+                  // lane; the full decision list is pull-on-demand (`state_query decisions`)
+                  // rather than re-generated English every turn.
+                  const failedDecisions = (yield* engagement.getDecisions(10)).filter((dec) => dec.outcome === "failed")
+                  if (failedDecisions.length >= 3) {
+                    const recentFailedVectors = failedDecisions.slice(-3).map((d) => d.decision).join("; ")
                     lines.push("")
                     lines.push("<decision-history>")
-                    lines.push(`  Recent decisions: ${decisions.length} (${succeeded.length} successful, ${failed.length} failed)`)
-                    for (const dec of decisions.slice(-5)) {
-                      const outcomeStr = dec.outcome ? ` [${dec.outcome}]` : " [pending]"
-                      lines.push(`  [${dec.phase}]${outcomeStr} ${dec.decision}`)
-                      if (dec.outcome === "failed" && dec.outcome_notes) {
-                        lines.push(`    → Failure: ${dec.outcome_notes}`)
-                      }
-                    }
-                    if (failed.length >= 3) {
-                      const recentFailedVectors = failed.slice(-3).map((d) => d.decision).join("; ")
-                      lines.push(`  ⚠ ${failed.length} failures detected. Avoid repeating: ${recentFailedVectors}`)
-                      lines.push("  Consider spawning critic subagent to analyze blockers or switching attack vector.")
-                    }
+                    lines.push(`  ⚠ ${failedDecisions.length} failed decisions. Avoid repeating: ${recentFailedVectors}`)
+                    lines.push("  Spawn a critic to analyze the blocker or switch attack vector. (state_query decisions for the full history.)")
                     lines.push("</decision-history>")
                   }
 
@@ -1588,28 +1579,9 @@ const layer = Layer.effect(
                   // REMINDER (static tool-usage instruction) moved to the cached
                   // static prefix — see staticLines below (C-2).
 
-                  // Slash-command tips are user-facing — only the coordinator
-                  // talks to the user, so subagents don't need them (QW2).
-                  const cmdHints: string[] = []
-                  const hostCount = Object.keys(state.hosts).length
-                  const vulnCount = Object.values(state.hosts).reduce((sum, h) => sum + h.vulns.length, 0)
-                  const credCount = Object.keys(state.credentials).length
-                  if (isCoordinator && step <= 2 && hostCount === 0) {
-                    cmdHints.push("Tip for user: /scope to set targets, /mode to choose execution style")
-                  }
-                  if (isCoordinator && vulnCount > 0 && vulnCount <= 3) {
-                    cmdHints.push("Tip for user: /vulns shows all findings, /report generates a report")
-                  }
-                  if (isCoordinator && credCount > 0 && credCount <= 2) {
-                    cmdHints.push("Tip for user: /creds shows all captured credentials")
-                  }
-                  if (cmdHints.length > 0) {
-                    lines.push("")
-                    lines.push("<command-hints>")
-                    lines.push("When relevant, naturally mention these commands to the user:")
-                    for (const h of cmdHints) lines.push(`  ${h}`)
-                    lines.push("</command-hints>")
-                  }
+                  // P3: slash-command tips dropped from the per-turn volatile lane —
+                  // the coordinator prompt already lists the available commands, so
+                  // re-generating tips every turn was pure bloat.
 
                   // Resolved-vectors ledger (R6 fix) — injected for BOTH coordinator
                   // and subagents so no agent re-opens a dead vector cross-session.
@@ -1636,8 +1608,10 @@ const layer = Layer.effect(
                     lines.push("</revisit-hint>")
                   }
 
-                  // Wordlist usage context
-                  const wordlistUsages = yield* engagement.getWordlistUsages()
+                  // Wordlist usage context — subagents only (the coordinator never
+                  // fuzzes; the kernel already tells subagents to state_query wordlists
+                  // before fuzzing, so this push is a convenience for the workers).
+                  const wordlistUsages = isCoordinator ? [] : yield* engagement.getWordlistUsages()
                   if (wordlistUsages.length > 0) {
                     const wlSummary = EngagementSchema.wordlistSummary(wordlistUsages.slice(-50))
                     lines.push("")
