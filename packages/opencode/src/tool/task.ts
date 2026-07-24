@@ -95,6 +95,20 @@ function renderOutput(input: {
   ].join("\n")
 }
 
+// P3b: condense a subagent's FINAL result before it is injected into the COORDINATOR
+// (where it replays every subsequent turn — a top context-rot driver). Head+tail cap
+// keeps the intro (what it did) and the tail (which carries the <agent-result> trailer
+// + conclusion), dropping the bulky middle. The subagent's FULL output stays in its own
+// session and its findings are in engagement state (state_query), so nothing is lost —
+// only the coordinator's replayed copy shrinks. Independent of trailer compliance.
+const COORD_RESULT_CAP = 3000
+function condenseResult(text: string): string {
+  if (text.length <= COORD_RESULT_CAP) return text
+  const head = text.slice(0, 900)
+  const tail = text.slice(-2000)
+  return `${head}\n\n…[${text.length - 2900} chars truncated — full output in the subagent session; query engagement state for recorded findings]…\n\n${tail}`
+}
+
 // I-1: parse the machine-read <agent-result> trailer that CONTEXT_PROTOCOL asks
 // every subagent to emit. This replaces guessing findings/failures from prose by
 // substring match (which silently misfiled a real finding as a "failure"). Returns
@@ -366,7 +380,7 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
             sessionID: r.childId as SessionID,
             state: r.status,
             summary: r.status === "completed" ? `Subagent completed: ${r.description}` : `Subagent failed: ${r.description}`,
-            text: r.text,
+            text: condenseResult(r.text),
           }),
         )
         .join("\n\n")
@@ -876,12 +890,12 @@ export const TaskTool = Tool.define(
                 const text = result.info.output ?? ""
                 const ctxSummary = buildContextSummary(params, nextSession.id, "completed", text)
                 yield* engagementStore.addAgentContext(ctxSummary)
-                yield* inject("completed", text)
+                yield* inject("completed", condenseResult(text))
               } else if (result.info?.status === "error") {
                 const text = result.info.error ?? ""
                 const ctxSummary = buildContextSummary(params, nextSession.id, "error", text)
                 yield* engagementStore.addAgentContext(ctxSummary)
-                yield* inject("error", text)
+                yield* inject("error", condenseResult(text))
               }
             }),
           ),
@@ -984,7 +998,7 @@ export const TaskTool = Tool.define(
             return {
               title: params.description,
               metadata,
-              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: outputText }),
+              output: renderOutput({ sessionID: nextSession.id, state: "completed", text: condenseResult(outputText) }),
             }
           }),
         (_, exit) =>
