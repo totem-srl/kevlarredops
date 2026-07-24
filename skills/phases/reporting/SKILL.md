@@ -1,5 +1,6 @@
 ---
 name: reporting-phase
+tags: [reporting]
 description: Reporting phase — generate structured pentest report from findings. Use when the current phase is REPORTING.
 ---
 

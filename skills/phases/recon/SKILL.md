@@ -1,5 +1,6 @@
 ---
 name: recon-phase
+tags: [recon]
 description: Passive reconnaissance phase — OSINT, DNS, WHOIS, subdomain discovery. Use when starting a new engagement or when the current phase is RECON.
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: enumeration-phase
+tags: [enumeration]
 description: Active enumeration phase — port scanning, service detection, banner grabbing. Use when the current phase is ENUMERATION.
 ---
 
