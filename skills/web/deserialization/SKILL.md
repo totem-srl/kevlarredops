@@ -1,6 +1,6 @@
 ---
 name: web-deserialization
-description: Insecure deserialization to RCE for web apps. Use when the app deserializes attacker-controlled data - cookies/tokens/hidden fields/params that are serialized blobs, VIEWSTATE, Java/PHP/.NET/Python/Node apps. Triggers - base64 starting rO0AB or hex AC ED 00 05 (Java), O:8: (PHP), __VIEWSTATE, pickle, node serialize, unserialize error, ObjectInputStream.
+description: Insecure deserialization to RCE for web apps. Use when the app deserializes attacker-controlled data - cookies/tokens/hidden fields/params that are serialized blobs, VIEWSTATE, Java/PHP/.NET/Python/Node apps. Triggers - base64 starting rO0AB or hex AC ED 00 05 (Java), PHP serialize O-prefix, __VIEWSTATE, python pickle, node-serialize, unserialize error, ObjectInputStream.
 tags: [vuln_assess, exploitation]
 ---
 
