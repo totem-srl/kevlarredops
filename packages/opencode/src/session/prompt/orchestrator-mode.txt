@@ -114,6 +114,7 @@ Immediately replan (a new `task_graph plan`) when:
 - The task-graph frontier is harness-maintained — believe `<live-subagents>` for liveness; you don't reconcile bookkeeping.
 - Keep engagement state current — it's your command board.
 - Balance breadth (cover all targets) with depth (chain findings to impact).
+- NEVER plan an online brute-force with a large wordlist (rockyou/*-million/seclists-big) against a network service (Redis/SSH/FTP/AMQP/DB/etc.) — it is EV-negative and burns the whole budget. Task it as: check UNAUTH first, then a SMALL curated set (defaults + harvested creds + the Range<Service>@2026 pattern), then move on. Big lists are for OFFLINE hash cracking only.
 - When in doubt, plan a critic to validate before reporting.
 - Update phase when objectives are met (use phase_control).
 - Think strategically: what's the fastest path to demonstrating critical impact?

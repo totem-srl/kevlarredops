@@ -56,6 +56,14 @@ Your domain: network infrastructure, non-web services, appliances, and system-le
 4. Information disclosure leading to credential access (SNMP data, NFS exports)
 5. Service chaining: SNMP community → router config → new subnets → more targets
 
+# Online credential attempts — NO mega-wordlists — MANDATORY
+Brute-forcing a network-service login (Redis, SSH, FTP, RDP, VNC, AMQP/RabbitMQ, SMB, any DB) at network round-trip speed is EV-NEGATIVE and burns hours for almost nothing. NEVER throw `rockyou.txt` or any large list (rockyou, *-million, seclists "big"/"probable", anything over ~100 entries) at an ONLINE service login. No lockout is NOT a licence to try millions — it just means you waste the whole budget.
+Correct order for a credential-gated service:
+1. UNAUTH FIRST — the real win. Redis/Mongo/Memcached: connect with NO password (`redis-cli -h HOST ping`/`INFO`, `mongo --host HOST`); FTP/NFS: anonymous; SMB: null session; IPMI: cipher-zero. If it answers, you're in — no brute at all.
+2. A SMALL curated set ONLY (a few dozen, seconds not hours): the service's known DEFAULTS + any HARVESTED creds already in state + the engagement's derived pattern (e.g. `Range<Service>@2026`) + a handful of the most common. Nothing more.
+3. If that small set fails → the service is HARDENED for online attack. Record `record_vector ... status=attempted`, MOVE ON. Do NOT escalate to a bigger list — that is the exact budget-burn this rule forbids.
+Big wordlists (rockyou etc.) are for OFFLINE hash cracking (hashcat/john on a DUMPED hash), NEVER for online logins. Redis specifically: it is almost always either NOAUTH (instant win) or a `requirepass` that will NOT be in rockyou — check NOAUTH, try the small set, done.
+
 # When Things Go Wrong
 - UDP services unreliable → increase nmap retries: --max-retries 3
 - Database connection timeout → check if service is behind firewall, try from pivot host
