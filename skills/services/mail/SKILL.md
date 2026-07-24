@@ -1,6 +1,6 @@
 ---
 name: svc-mail
-description: Mail server attack techniques — SMTP relay, user enumeration, header injection.
+description: Mail server attack techniques — SMTP open relay, VRFY/EXPN/RCPT user enumeration, header injection, IMAP/POP3 access. Use when a mail service is found. Triggers - SMTP 25/465/587, POP3 110, IMAP 143, Postfix/Exim/Sendmail/Dovecot banner, VRFY.
 ---
 
 # Mail Server Attack Reference

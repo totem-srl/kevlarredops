@@ -1,6 +1,6 @@
 ---
 name: svc-ftp
-description: FTP attack techniques — anonymous access, version CVEs, credential attacks.
+description: FTP attack techniques — anonymous access, writable dirs, version CVEs, credential attacks. Use when FTP is open. Triggers - port 21, ftp banner, vsftpd 2.3.4, ProFTPD mod_copy, anonymous login, pure-ftpd.
 ---
 
 # FTP Attack Reference

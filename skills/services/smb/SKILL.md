@@ -1,6 +1,6 @@
 ---
 name: svc-smb
-description: SMB/CIFS attack techniques — null sessions, relay, share enumeration, EternalBlue.
+description: SMB/CIFS attack techniques — null sessions, share enumeration, NTLM relay, EternalBlue, signing checks. Use when SMB is found. Triggers - ports 445/139, netbios, MS17-010 EternalBlue, signing:False, null session, share access, PetitPotam/coerce.
 ---
 
 # SMB Attack Reference

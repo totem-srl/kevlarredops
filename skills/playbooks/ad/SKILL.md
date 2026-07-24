@@ -1,6 +1,6 @@
 ---
 name: playbook-ad
-description: Active Directory penetration testing playbook — Kerberos, LDAP, GPO, lateral movement.
+description: Active Directory pentest playbook — Kerberos, LDAP, GPO, ADCS, delegation, lateral movement, DA paths. Load at the START of an AD engagement or when a Windows domain / DC is found. Triggers - domain controller, Kerberos 88, LDAP 389/636, domain SMB, BloodHound, kerberoast, AS-REP, NTLM, ESC1-8.
 ---
 
 # Active Directory Pentest Playbook

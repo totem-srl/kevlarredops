@@ -1,6 +1,6 @@
 ---
 name: svc-dns
-description: DNS attack techniques — zone transfer, cache poisoning, subdomain takeover.
+description: DNS attack techniques — zone transfer, subdomain enumeration/takeover, cache poisoning. Use when DNS is found or you're mapping a domain. Triggers - port 53, named/bind, AXFR zone transfer, dangling CNAME, subdomain takeover, wildcard DNS.
 ---
 
 # DNS Attack Reference

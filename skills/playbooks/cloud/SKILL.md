@@ -1,6 +1,6 @@
 ---
 name: playbook-cloud
-description: Cloud security assessment playbook — AWS, GCP, Azure misconfiguration and attack patterns.
+description: Cloud security playbook — AWS/GCP/Azure misconfiguration and attack patterns (IAM, storage, metadata, privesc). Load when the target is a cloud environment or you obtain cloud creds/metadata. Triggers - AWS/GCP/Azure, IAM role/policy, S3/blob bucket, 169.254.169.254 metadata, access key, assume-role, cloud console.
 ---
 
 # Cloud Security Assessment Playbook

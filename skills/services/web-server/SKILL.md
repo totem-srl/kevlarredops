@@ -1,6 +1,6 @@
 ---
 name: svc-web-server
-description: Web server (Apache/Nginx/IIS) attack techniques — misconfigs, known CVEs, path traversal.
+description: Web SERVER software (not app-layer) attack techniques — server misconfigs, known server CVEs, path traversal, exposed status/config. Use when you fingerprint the web server itself (for app-layer bugs use the web-<class> skills). Triggers - Server header, Apache 2.4.49/2.4.50, nginx alias traversal, IIS, Tomcat, /server-status, .htaccess.
 ---
 
 # Web Server Attack Reference

@@ -1,6 +1,6 @@
 ---
 name: svc-database
-description: Database attack techniques — MySQL, PostgreSQL, MSSQL auth bypass, UDF injection, file read/write.
+description: Database service attack techniques — auth bypass, UDF/xp_cmdshell/COPY-TO-PROGRAM RCE, file read/write, cred dump. Use when a database service is found or you have DB creds. Triggers - MySQL 3306, PostgreSQL 5432, MSSQL 1433, Oracle 1521, Redis 6379, MongoDB 27017, db banner, default DB creds, NOAUTH.
 ---
 
 # Database Attack Reference

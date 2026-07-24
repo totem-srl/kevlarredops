@@ -1,6 +1,6 @@
 ---
 name: svc-docker-k8s
-description: Docker and Kubernetes attack techniques — API exposure, container escape, RBAC issues.
+description: Docker/Kubernetes attack techniques — exposed API abuse, container escape, RBAC/privileged-pod issues, secret theft. Use when a container/orchestration surface is found. Triggers - Docker 2375/2376, Kubernetes API 6443, kubelet 10250, etcd 2379, /version, privileged pod, service-account token, docker.sock.
 ---
 
 # Docker & Kubernetes Attack Reference
