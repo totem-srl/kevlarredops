@@ -6,6 +6,12 @@ import { InstanceState } from "@/effect/instance-state"
 import PROMPT_PENTEST from "./prompt/pentest.txt"
 import PROMPT_KERNEL from "./prompt/kernel.txt"
 import PROMPT_KERNEL_SUBAGENT from "./prompt/kernel-subagent.txt"
+import PROMPT_KERNEL_EXPLOIT from "./prompt/kernel-exploit.txt"
+
+// Agents whose core job is exploiting a vuln/CVE — they get the shared exploitation
+// methodology addendum. Recon/scanner/enumerator/critic/reporter/identity/post_exploit
+// do NOT (their doctrine is elsewhere), keeping their kernel lean.
+const EXPLOIT_AGENTS = new Set(["exploiter", "exploit_dev", "webapp", "infrastructure"])
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
@@ -46,7 +52,10 @@ const layer = Layer.effect(
       // copy-pasted into each prompt. Subagents also get the specialist-common
       // addendum. Rides the cached system prefix.
       kernel: Effect.fn("SystemPrompt.kernel")(function* (agent: Agent.Info) {
-        return agent.mode === "subagent" ? [PROMPT_KERNEL, PROMPT_KERNEL_SUBAGENT].join("\n\n") : PROMPT_KERNEL
+        const parts = [PROMPT_KERNEL]
+        if (agent.mode === "subagent") parts.push(PROMPT_KERNEL_SUBAGENT)
+        if (EXPLOIT_AGENTS.has(agent.name)) parts.push(PROMPT_KERNEL_EXPLOIT)
+        return parts.join("\n\n")
       }),
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
