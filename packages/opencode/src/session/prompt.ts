@@ -1351,7 +1351,7 @@ const layer = Layer.effect(
 
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
-            const [skills, env, instructions, mcpInstructions, modelMsgs, engagementCtx] = yield* Effect.all([
+            const [skills, env, instructions, mcpInstructions, modelMsgs, engagementCtx, kernel] = yield* Effect.all([
               sys.skills(agent),
               sys.environment(model),
               instruction.system().pipe(Effect.orDie),
@@ -1695,12 +1695,16 @@ const layer = Layer.effect(
                   return undefined
                 }
               }),
+              sys.kernel(agent),
             ])
             // Static prefix only — the volatile engagement state is passed
             // separately as `volatileSystem` so this block stays cacheable
             // across turns (see redesign QW1). Ordered most-stable first.
             const system = [
               ...env,
+              // Shared operator-protocol kernel (P1) — one copy for every agent,
+              // on the cached prefix; specialty prompts no longer repeat it.
+              ...(kernel ? [kernel] : []),
               ...instructions,
               ...(mcpInstructions ? [mcpInstructions] : []),
               ...(skills ? [skills] : []),

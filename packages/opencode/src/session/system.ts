@@ -4,6 +4,8 @@ import { Context, Effect, Layer } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 
 import PROMPT_PENTEST from "./prompt/pentest.txt"
+import PROMPT_KERNEL from "./prompt/kernel.txt"
+import PROMPT_KERNEL_SUBAGENT from "./prompt/kernel-subagent.txt"
 import type { Provider } from "@/provider/provider"
 import type { Agent } from "@/agent/agent"
 import { Permission } from "@/permission"
@@ -23,6 +25,7 @@ export function provider(model: Provider.Model) {
 
 export interface Interface {
   readonly environment: (model: Provider.Model) => Effect.Effect<string[]>
+  readonly kernel: (agent: Agent.Info) => Effect.Effect<string>
   readonly skills: (agent: Agent.Info) => Effect.Effect<string | undefined>
   readonly mcp: (agent: Agent.Info, permission?: PermissionV1.Ruleset) => Effect.Effect<string | undefined>
 }
@@ -38,6 +41,13 @@ const layer = Layer.effect(
     const engagement = yield* EngagementStore.Service
 
     return Service.of({
+      // Shared operator-protocol kernel injected for EVERY agent (coordinator +
+      // specialists) so cross-cutting doctrine lives ONCE instead of being
+      // copy-pasted into each prompt. Subagents also get the specialist-common
+      // addendum. Rides the cached system prefix.
+      kernel: Effect.fn("SystemPrompt.kernel")(function* (agent: Agent.Info) {
+        return agent.mode === "subagent" ? [PROMPT_KERNEL, PROMPT_KERNEL_SUBAGENT].join("\n\n") : PROMPT_KERNEL
+      }),
       environment: Effect.fn("SystemPrompt.environment")(function* (model: Provider.Model) {
         const ctx = yield* InstanceState.context
         const references = yield* Effect.gen(function* () {
