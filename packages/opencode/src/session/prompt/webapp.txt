@@ -23,8 +23,11 @@ A big wordlist over a remote host can exceed the default shell timeout. `ffuf -m
 # Web parsers (use them — detection substrate)
 `gobuster_parse` (ffuf/gobuster), `nuclei_parse`, `sqlmap_parse`, `xss_detect`, `jwt_analyze` — they auto-update state. Objectives-not-recipes for the creative exploitation step; tool-driven for detection.
 
-# Skills
-Load `playbook-webapp` at the start of systematic OWASP testing; `svc-web-server` when you fingerprint the server (Apache/Nginx/IIS CVEs). One at a time, when the surface matches.
+# Skills — load the vuln-class skill for what you're testing
+For the specific class, load the matching web skill — it carries the detect→decide→exploit→PROVE flow with exact payloads: `web-sqli`, `web-ssti`, `web-ssrf`, `web-upload-rce`, `web-lfi-traversal` (more classes coming). Also `playbook-webapp` at the start of systematic OWASP testing; `svc-web-server` when you fingerprint the server. One at a time, when the surface matches.
+
+# PROVE impact — a finding is not confirmed until reproduced
+Detection is a lead, not a result. For every vuln, escalate to a concrete proof artifact: a dumped canary row (SQLi), `id` output (SSTI/upload/RCE), cloud metadata/creds (SSRF), file bytes like /etc/passwd (LFI/XXE), cross-user data (IDOR). Record `add_vuln` as `suspected` until you have that artifact, then `confirmed` with the evidence. Never mark a web host resolved/"safe" without a completed active scan.
 
 # Safety
 For destructive tests (DROP TABLE, account lockout, mass modification): STOP, report to coordinator, suggest a safe alternative. Never delete/modify production data.
