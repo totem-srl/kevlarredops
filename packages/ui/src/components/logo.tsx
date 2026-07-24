@@ -32,30 +32,83 @@ export const Splash = (props: Pick<ComponentProps<"svg">, "ref" | "class">) => {
 }
 
 export const Logo = (props: { class?: string }) => {
+  // Pixel wordmark spelling "pentestcode" on a 6px grid, cell pitch 30.
+  // The six glyphs shared with the old "opencode" mark (p, e, n, c, o, d) are
+  // reused verbatim and translated into place; t and s are drawn as rects in
+  // the same style. "pentest" uses --icon-base, "code" uses --icon-strong-base
+  // to preserve the original two-tone emphasis.
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 234 42"
+      viewBox="0 0 324 42"
       fill="none"
       classList={{ [props.class ?? ""]: !!props.class }}
     >
       <g>
-        <path d="M18 30H6V18H18V30Z" fill="var(--icon-weak-base)" />
-        <path d="M18 12H6V30H18V12ZM24 36H0V6H24V36Z" fill="var(--icon-base)" />
-        <path d="M48 30H36V18H48V30Z" fill="var(--icon-weak-base)" />
-        <path d="M36 30H48V12H36V30ZM54 36H36V42H30V6H54V36Z" fill="var(--icon-base)" />
-        <path d="M84 24V30H66V24H84Z" fill="var(--icon-weak-base)" />
-        <path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="var(--icon-base)" />
-        <path d="M108 36H96V18H108V36Z" fill="var(--icon-weak-base)" />
-        <path d="M108 12H96V36H90V6H108V12ZM114 36H108V12H114V36Z" fill="var(--icon-base)" />
-        <path d="M144 30H126V18H144V30Z" fill="var(--icon-weak-base)" />
-        <path d="M144 12H126V30H144V36H120V6H144V12Z" fill="var(--icon-strong-base)" />
-        <path d="M168 30H156V18H168V30Z" fill="var(--icon-weak-base)" />
-        <path d="M168 12H156V30H168V12ZM174 36H150V6H174V36Z" fill="var(--icon-strong-base)" />
-        <path d="M198 30H186V18H198V30Z" fill="var(--icon-weak-base)" />
-        <path d="M198 12H186V30H198V12ZM204 36H180V6H198V0H204V36Z" fill="var(--icon-strong-base)" />
-        <path d="M234 24V30H216V24H234Z" fill="var(--icon-weak-base)" />
-        <path d="M216 12V18H228V12H216ZM234 24H216V30H234V36H210V6H234V24Z" fill="var(--icon-strong-base)" />
+        {/* p — cell 0 (source cell 30, dx -30) */}
+        <g transform="translate(-30,0)">
+          <path d="M48 30H36V18H48V30Z" fill="var(--icon-weak-base)" />
+          <path d="M36 30H48V12H36V30ZM54 36H36V42H30V6H54V36Z" fill="var(--icon-base)" />
+        </g>
+        {/* e — cell 30 (source cell 60, dx -30) */}
+        <g transform="translate(-30,0)">
+          <path d="M84 24V30H66V24H84Z" fill="var(--icon-weak-base)" />
+          <path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="var(--icon-base)" />
+        </g>
+        {/* n — cell 60 (source cell 90, dx -30) */}
+        <g transform="translate(-30,0)">
+          <path d="M108 36H96V18H108V36Z" fill="var(--icon-weak-base)" />
+          <path d="M108 12H96V36H90V6H108V12ZM114 36H108V12H114V36Z" fill="var(--icon-base)" />
+        </g>
+        {/* t — cell 90 */}
+        <g transform="translate(90,0)" fill="var(--icon-base)">
+          <rect x="6" y="6" width="6" height="6" />
+          <rect x="0" y="12" width="18" height="6" />
+          <rect x="6" y="18" width="6" height="6" />
+          <rect x="6" y="24" width="6" height="6" />
+          <rect x="6" y="30" width="12" height="6" />
+        </g>
+        {/* e — cell 120 (source cell 60, dx +60) */}
+        <g transform="translate(60,0)">
+          <path d="M84 24V30H66V24H84Z" fill="var(--icon-weak-base)" />
+          <path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="var(--icon-base)" />
+        </g>
+        {/* s — cell 150 */}
+        <g transform="translate(150,0)" fill="var(--icon-base)">
+          <rect x="0" y="6" width="24" height="6" />
+          <rect x="0" y="12" width="6" height="6" />
+          <rect x="0" y="18" width="24" height="6" />
+          <rect x="18" y="24" width="6" height="6" />
+          <rect x="0" y="30" width="24" height="6" />
+        </g>
+        {/* t — cell 180 */}
+        <g transform="translate(180,0)" fill="var(--icon-base)">
+          <rect x="6" y="6" width="6" height="6" />
+          <rect x="0" y="12" width="18" height="6" />
+          <rect x="6" y="18" width="6" height="6" />
+          <rect x="6" y="24" width="6" height="6" />
+          <rect x="6" y="30" width="12" height="6" />
+        </g>
+        {/* c — cell 210 (source cell 120, dx +90) */}
+        <g transform="translate(90,0)">
+          <path d="M144 30H126V18H144V30Z" fill="var(--icon-weak-base)" />
+          <path d="M144 12H126V30H144V36H120V6H144V12Z" fill="var(--icon-strong-base)" />
+        </g>
+        {/* o — cell 240 (source cell 0, dx +240) */}
+        <g transform="translate(240,0)">
+          <path d="M18 30H6V18H18V30Z" fill="var(--icon-weak-base)" />
+          <path d="M18 12H6V30H18V12ZM24 36H0V6H24V36Z" fill="var(--icon-strong-base)" />
+        </g>
+        {/* d — cell 270 (source cell 180, dx +90) */}
+        <g transform="translate(90,0)">
+          <path d="M198 30H186V18H198V30Z" fill="var(--icon-weak-base)" />
+          <path d="M198 12H186V30H198V12ZM204 36H180V6H198V0H204V36Z" fill="var(--icon-strong-base)" />
+        </g>
+        {/* e — cell 300 (source cell 60, dx +240) */}
+        <g transform="translate(240,0)">
+          <path d="M84 24V30H66V24H84Z" fill="var(--icon-weak-base)" />
+          <path d="M84 24H66V30H84V36H60V6H84V24ZM66 18H78V12H66V18Z" fill="var(--icon-strong-base)" />
+        </g>
       </g>
     </svg>
   )
