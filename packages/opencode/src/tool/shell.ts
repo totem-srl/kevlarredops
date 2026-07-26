@@ -1,4 +1,4 @@
-import { Effect, Stream } from "effect"
+import { Effect, Semaphore, Stream } from "effect"
 import os from "os"
 import { createWriteStream } from "node:fs"
 import * as Tool from "./tool"
@@ -355,6 +355,28 @@ export const ShellTool = Tool.define(
     // Override via OPENCODE_BASH_DEFAULT_TIMEOUT_MS.
     const defaultTimeoutMs = flags.bashDefaultTimeoutMs ?? 5 * 60 * 1000
 
+    // C (safety rail): serialize concurrent shell execs against the SAME host so the
+    // fleet can't self-DoS a foothold/target by hammering it in parallel — the dev.9
+    // incident (3 agents concurrently firing the stateless-RCE driver crashed the
+    // Next.js entry host). Per-host semaphore, shared across ALL sessions (ShellTool
+    // is a per-runtime singleton). Cap default 2; OPENCODE_PER_HOST_EXEC_CONCURRENCY=1
+    // fully serializes. Host is the target IP parsed from the command (reuses the
+    // scope matcher); localhost/no-IP commands are never throttled.
+    const perHostExecCap = Math.max(1, flags.perHostExecConcurrency ?? 2)
+    const hostExecSemaphores = new Map<string, Semaphore.Semaphore>()
+    const hostExecSem = (host: string) => {
+      let sem = hostExecSemaphores.get(host)
+      if (!sem) {
+        sem = Semaphore.makeUnsafe(perHostExecCap)
+        hostExecSemaphores.set(host, sem)
+      }
+      return sem
+    }
+    const execTargetHost = (command: string): string | undefined =>
+      ScopeMatcher.extractTargetsWithWarning(command)
+        .targets.map((t) => ScopeMatcher.extractHost(t))
+        .find((h) => ScopeMatcher.isIp(h) && !h.startsWith("127.") && h !== "0.0.0.0" && h !== "::1")
+
     const cygpath = Effect.fn("ShellTool.cygpath")(function* (shell: string, text: string) {
       const lines = yield* spawner
         .lines(ChildProcess.make(shell, ["-lc", 'cygpath -w -- "$1"', "_", text]))
@@ -688,16 +710,11 @@ export const ShellTool = Tool.define(
                 if (warning) scopePrefix = `[${warning}]\n\n` + scopePrefix
               }
 
-              const result = yield* run(
-                {
-                  shell,
-                  command: params.command,
-                  cwd,
-                  env: yield* shellEnv(ctx, cwd),
-                  timeout,
-                },
-                ctx,
-              )
+              const env = yield* shellEnv(ctx, cwd)
+              const runEffect = run({ shell, command: params.command, cwd, env, timeout }, ctx)
+              // C (safety rail): serialize concurrent execs to the same target host.
+              const execHost = execTargetHost(params.command)
+              const result = yield* (execHost ? hostExecSem(execHost).withPermits(1)(runEffect) : runEffect)
 
               if (scopePrefix) result.output = scopePrefix + result.output
               return result

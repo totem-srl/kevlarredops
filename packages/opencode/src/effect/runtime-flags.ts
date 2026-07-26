@@ -65,6 +65,12 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   // stranding its dependents forever (the DAG-deadlock). undefined -> code default
   // (300000 = 5min). Lower it for fast-iterating benches.
   orchestratorStallMs: positiveInteger("OPENCODE_ORCHESTRATOR_STALL_MS"),
+  // Safety rail: max concurrent shell execs targeting the SAME host IP. Commands to
+  // one host beyond this serialize, so the fleet can't self-DoS a foothold/target by
+  // hammering it in parallel (the dev.9 react-kill: 3 agents firing the stateless-RCE
+  // driver concurrently crashed the app). undefined -> code default (2); set 1 to
+  // fully serialize per host.
+  perHostExecConcurrency: positiveInteger("OPENCODE_PER_HOST_EXEC_CONCURRENCY"),
   // Max concurrent main-model LLM streams per provider (coordinator + subagents).
   // Caps outbound concurrency so a fan-out doesn't saturate the provider into
   // 429/529 overloads. undefined -> code default. Small-model (offload/title)
