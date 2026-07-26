@@ -65,6 +65,13 @@ export class Service extends ConfigService.Service<Service>()("@pentestcode/Runt
   // stranding its dependents forever (the DAG-deadlock). undefined -> code default
   // (300000 = 5min). Lower it for fast-iterating benches.
   orchestratorStallMs: positiveInteger("OPENCODE_ORCHESTRATOR_STALL_MS"),
+  // No-progress early-cut: when the fleet keeps spending (subagents in flight) but
+  // ZERO new state markers (access/credential/host/objective) land for this many ms,
+  // wake the coordinator ONCE with an advisory to cut the dead-end branch and pivot
+  // (the dev.9 failure: 80% of the run poured into a pivot that scored nothing).
+  // Advisory only — never auto-kills, so a hard-but-real grind can justify continuing.
+  // undefined -> code default (1500000 = 25min). Progress-gated, NOT step-count.
+  orchestratorNoProgressMs: positiveInteger("OPENCODE_ORCHESTRATOR_NOPROGRESS_MS"),
   // Safety rail: max concurrent shell execs targeting the SAME host IP. Commands to
   // one host beyond this serialize, so the fleet can't self-DoS a foothold/target by
   // hammering it in parallel (the dev.9 react-kill: 3 agents firing the stateless-RCE

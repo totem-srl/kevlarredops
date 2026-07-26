@@ -284,6 +284,29 @@ function formatStalledTask(stall: Orchestrator.Stall): string {
   ].join("\n")
 }
 
+// B: changelog actions that count as genuine forward motion in an attack branch.
+// add_vuln is deliberately EXCLUDED — a branch can spam suspected vulns without
+// ever converting to access, which would mask a real dead end.
+const PROGRESS_ACTIONS = new Set(["add_access", "add_credential", "add_host", "complete_objective"])
+
+// B: no-progress early-cut wake. The harness detects that the fleet keeps spending
+// while ZERO new state markers land, and wakes the coordinator to DECIDE (cut the
+// dead-end branch and pivot, or justify a real grind). Advisory — never auto-kills;
+// progress-gated (state markers), NOT raw step count, so a hard-but-real grind on a
+// confirmed target isn't murdered (the dev.6 cacti-root grind took ~2h).
+function formatNoProgress(idleMs: number, inFlight: number): string {
+  const mins = Math.floor(idleMs / 60_000)
+  return [
+    `<no-progress idle="${mins} min" active-agents="${inFlight}">`,
+    `No NEW access, credential, host, or completed objective has landed in engagement state for ${mins} min while ${inFlight} subagent(s) keep spending. A branch that burns budget with ZERO new markers is usually a dead end (the dev.9 failure: ~80% of the run poured into a pivot that scored nothing and killed the foothold).`,
+    `DECIDE now — do NOT just keep pouring agents in:`,
+    `- Dead end → task_graph kill its tasks, BANK any reachable-but-unattacked host/segment (state_query hosts / reachable), and pivot the freed budget there.`,
+    `- Genuinely hard-but-REAL grind on a confirmed-vulnerable target you're methodically working → say so and continue. This is advisory, not a stop.`,
+    `- Out of leads → conclude this branch and consolidate findings.`,
+    `</no-progress>`,
+  ].join("\n")
+}
+
 // Compact objective prompt for an orchestrated node. Heavy context-carry
 // (CONTEXT_PROTOCOL, prior/other-agent work) is prepended by the spawner, so
 // this stays lean — objectives, not scripts.
@@ -333,6 +356,9 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
   // dependents wakes the coordinator. stallCheckMs is the poll cadence.
   const stallMs = flags.orchestratorStallMs ?? 300_000
   const stallCheckMs = Math.max(15_000, Math.floor(stallMs / 2))
+  // B: no-progress early-cut window (advisory wake when the fleet spends with no
+  // new state markers). Shares the watchdog poll cadence.
+  const noProgressMs = flags.orchestratorNoProgressMs ?? 25 * 60_000
 
   // REAL in-flight count from the background-job registry — the source of truth
   // for free slots (graph status can lag).
@@ -366,6 +392,11 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
   const watchdogStarted = yield* Ref.make(false)
   const lastCoordinatorCtx = yield* Ref.make<Tool.Context | undefined>(undefined)
   const stallAlerted = yield* Ref.make<Set<string>>(new Set())
+  // B: no-progress state. lastProgressMs = high-water timestamp of the newest
+  // progress marker seen (0 = uninitialized). noProgressAlerted dedups so we nudge
+  // once per stale window; a new marker re-arms it.
+  const lastProgressMs = yield* Ref.make(0)
+  const noProgressAlerted = yield* Ref.make(false)
 
   const flushBatch = (batch: Settled[]) =>
     Effect.gen(function* () {
@@ -629,6 +660,41 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
             parts: [{ type: "text", synthetic: true, text: formatStalledTask(stall) }],
           })
           .pipe(Effect.ignore)
+      }
+
+      // B: no-progress early-cut advisory. Newest progress marker vs now; fire ONCE
+      // per stale window when the fleet is actively spending; re-arm on a new marker.
+      const nowMs = Date.now()
+      const changelog = yield* engagementStore.getChangelog()
+      let newestProgress = 0
+      for (const entry of changelog) {
+        if (!PROGRESS_ACTIONS.has(entry.action)) continue
+        const t = Date.parse(entry.timestamp)
+        if (!Number.isNaN(t) && t > newestProgress) newestProgress = t
+      }
+      const prevProgress = yield* Ref.get(lastProgressMs)
+      if (prevProgress === 0) {
+        // First observation: start the no-progress clock now (full grace window).
+        yield* Ref.set(lastProgressMs, Math.max(newestProgress, nowMs))
+      } else if (newestProgress > prevProgress) {
+        // A new marker landed → forward motion; re-arm.
+        yield* Ref.set(lastProgressMs, newestProgress)
+        yield* Ref.set(noProgressAlerted, false)
+      } else {
+        const already = yield* Ref.get(noProgressAlerted)
+        const active = yield* realInFlight(ctx)
+        if (!already && active > 0 && nowMs - prevProgress >= noProgressMs) {
+          yield* Ref.set(noProgressAlerted, true)
+          const currentParent = yield* sessions.get(ctx.sessionID)
+          yield* ops
+            .prompt({
+              sessionID: ctx.sessionID,
+              agent: currentParent.agent ?? ctx.agent,
+              variant: undefined,
+              parts: [{ type: "text", synthetic: true, text: formatNoProgress(nowMs - prevProgress, active) }],
+            })
+            .pipe(Effect.ignore)
+        }
       }
     }
   }).pipe(Effect.catchCause(() => Effect.void))
