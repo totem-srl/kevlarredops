@@ -1847,10 +1847,22 @@ const layer = Layer.effect(
       const cfg = yield* config.get()
 
       if (cfg.small_model) {
-        const parsed = parseModel(cfg.small_model)
-        return yield* getModel(parsed.providerID, parsed.modelID).pipe(
+        // Accept a bare "model" (no provider prefix) by resolving it against the
+        // CURRENT provider — so `small_model: "glm-4.7"` works, not only
+        // "provider/glm-4.7". If it STILL doesn't resolve, warn LOUDLY instead of
+        // silently returning undefined: the prior silent no-op made a mis-set
+        // small_model run EVERYTHING (compaction/offload/title) on the expensive model.
+        const parsed = cfg.small_model.includes("/")
+          ? parseModel(cfg.small_model)
+          : { providerID, modelID: ModelV2.ID.make(cfg.small_model) }
+        const resolved = yield* getModel(parsed.providerID, parsed.modelID).pipe(
           Effect.catchTag("ProviderModelNotFoundError", () => Effect.succeed(undefined)),
         )
+        if (!resolved)
+          yield* Effect.logWarning(
+            `[small_model] "${cfg.small_model}" is configured but did NOT resolve (${parsed.providerID}/${parsed.modelID}) — cheap-model offload/tiering is DISABLED. Use a "provider/model" value the provider actually serves.`,
+          )
+        return resolved
       }
 
       const s = yield* InstanceState.get(state)

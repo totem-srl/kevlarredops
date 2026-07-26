@@ -369,9 +369,16 @@ const layer = Layer.effect(
       }
 
       const agent = yield* agents.get("compaction")
+      // Compaction (summarizing the transcript) is the textbook cheap-model job.
+      // Prefer the configured small model; fall back to the main model only when a
+      // compaction-agent model is set or no small model resolves. (A2)
+      const smallForCompaction = agent.model
+        ? undefined
+        : yield* provider.getSmallModel(userMessage.model.providerID)
       const model = agent.model
         ? yield* provider.getModel(agent.model.providerID, agent.model.modelID).pipe(Effect.orDie)
-        : yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie)
+        : smallForCompaction ??
+          (yield* provider.getModel(userMessage.model.providerID, userMessage.model.modelID).pipe(Effect.orDie))
       const cfg = yield* config.get()
       const history = compactionPart && messages.at(-1)?.info.id === input.parentID ? messages.slice(0, -1) : messages
       const prior = completedCompactions(history)
