@@ -266,22 +266,36 @@ function formatInterruptAlert(alert: EngagementSchema.Alert): string {
 // resolves the stall itself — harness computes, coordinator decides). Modeled on
 // formatInterruptAlert; injected via the same synthetic-prompt path.
 function formatStalledTask(stall: Orchestrator.Stall): string {
-  const mins = Math.floor(stall.ageMs / 60_000)
-  const age = mins >= 1 ? `${mins} min` : `${Math.floor(stall.ageMs / 1_000)}s`
+  const idleMin = Math.floor(stall.idleMs / 60_000)
+  const idle = idleMin >= 1 ? `${idleMin} min` : `${Math.floor(stall.idleMs / 1_000)}s`
+  const ageMin = Math.floor(stall.ageMs / 60_000)
   const deps = stall.starvedDependents
     .map((d) => `${d.id}${d.assignedAgent ? `→${d.assignedAgent}` : ""}`)
     .join(", ")
   const id = stall.stalled.id
+  const who = stall.stalled.assignedAgent ? ` (${stall.stalled.assignedAgent})` : ""
   return [
-    `<stalled-task task="${id}" running="${age}">`,
-    `Task "${id}"${stall.stalled.assignedAgent ? ` (${stall.stalled.assignedAgent})` : ""} has been in flight for ${age} and has NOT returned. ${stall.starvedDependents.length} task(s) depend on it and CANNOT start until it does: ${deps}.`,
-    `A subagent that never returns strands its dependents forever. DECIDE now (do not just wait):`,
-    `- task_graph kill {"data":{"id":"${id}"}} — if it is stuck/looping/chasing a dead end (hard-stops it, reclaims tokens).`,
-    `- task_graph complete {"data":{"id":"${id}","result":"..."}} — if its deliverable is ALREADY met (verify via state_query, e.g. the tunnel/live_session is up), so its dependents launch immediately.`,
-    `- task_graph plan {"tasks":[...]} — re-scope: move its open-ended follow-on work into a NEW task so this gate can close.`,
-    `- Do nothing ONLY if it is legitimately still working and its dependents can afford to wait.`,
+    `<stalled-task task="${id}" silent="${idle}" running="${ageMin} min">`,
+    `Task "${id}"${who} has produced NO output for ${idle} (in flight ${ageMin} min). ${stall.starvedDependents.length} task(s) depend on it and cannot start: ${deps}.`,
+    `Silence ≠ stuck: operational work (reverse shell, gadget build, tunnel) is legitimately slow and quiet. Weigh before acting — killing a working agent loses ALL its in-context progress:`,
+    `- PREFER WAIT if it's a shell/exploit/tunnel build — check state_query first (a live_session or new access may be landing).`,
+    `- task_graph complete {"data":{"id":"${id}","result":"..."}} — if its deliverable is ALREADY met (verify, e.g. the live_session is up), so dependents launch.`,
+    `- task_graph plan {"tasks":[...]} — re-scope its open-ended follow-on into a NEW task so this gate closes.`,
+    `- task_graph kill {"data":{"id":"${id}"}} — ONLY if truly hung/looping. Then RE-DELEGATE a fresh subagent — do NOT take the work over yourself (that's the solo-grind failure).`,
     `</stalled-task>`,
   ].join("\n")
+}
+
+// #1: operational roles legitimately run long AND silent (reverse shells, gadget
+// builds, tunnels routinely take 20-40 min with no incremental state writes). Give
+// them a larger stall threshold so the watchdog doesn't flag a WORKING agent as hung
+// and prompt the coordinator to kill it (the field-run death-spiral). Other roles
+// keep the base stallMs.
+const OPERATIONAL_STALL_MULTIPLIER: Record<string, number> = {
+  exploiter: 4,
+  exploit_dev: 4,
+  post_exploit: 4,
+  infrastructure: 4,
 }
 
 // B: changelog actions that count as genuine forward motion in an attack branch.
@@ -642,7 +656,31 @@ export const makeOrchestratedSpawner = Effect.fn("Orchestrator.makeSpawner")(fun
       const ops = ctx.extra?.promptOps as TaskPromptOps | undefined
       if (!ops) continue
       const graph = yield* engagementStore.getTaskGraph()
-      const stalls = Orchestrator.detectStall(graph, { stallMs, nowMs: Date.now() })
+      // #1: build the per-task last-activity map so detectStall gates on SILENCE, not
+      // dispatch-age — a subagent still emitting tool-calls is working, not hung. Map
+      // node→child-session via job metadata, then MAX(part.time_created) per session.
+      const jobs = yield* background.list()
+      const nodeToSession: Record<string, SessionID> = {}
+      for (const j of jobs) {
+        if (j.type !== id || j.status !== "running" || j.metadata?.parentSessionId !== ctx.sessionID) continue
+        const nodeId = j.metadata?.taskNodeId as string | undefined
+        const sid = j.metadata?.sessionId as string | undefined
+        if (nodeId && sid) nodeToSession[nodeId] = sid as SessionID
+      }
+      const activityBySession = yield* MessageV2.lastActivityBySession(Object.values(nodeToSession)).pipe(
+        Effect.provideService(Database.Service, database),
+      )
+      const lastActivityMs: Record<string, number> = {}
+      for (const [nodeId, sid] of Object.entries(nodeToSession)) {
+        const ms = activityBySession[sid]
+        if (ms !== undefined) lastActivityMs[nodeId] = ms
+      }
+      const stalls = Orchestrator.detectStall(graph, {
+        stallMs,
+        nowMs: Date.now(),
+        lastActivityMs,
+        roleStallMultiplier: OPERATIONAL_STALL_MULTIPLIER,
+      })
       // Re-arm: drop alerts for tasks that are no longer stalled so a genuine
       // re-stall alerts once more; keep only still-stalled ids.
       const stalledIds = new Set(stalls.map((s) => s.stalled.id))

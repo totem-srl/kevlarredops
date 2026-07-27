@@ -297,4 +297,62 @@ describe("Orchestrator.detectStall — A-4 stall watchdog (DAG-deadlock guard)",
     const stalls = Orchestrator.detectStall(g, { stallMs: 100_000, nowMs: BASE + 500_000 })
     expect(stalls.map((s) => s.stalled.id)).toEqual(["old", "recent"]) // oldest (age 500k) first
   })
+
+  test("#1: does NOT stall an OLD task that is still ACTIVE (recent output)", () => {
+    const g = graph(
+      node({ id: "pivot", status: "running", updatedAt: at(0) }),
+      node({ id: "exploit", status: "planned", dependsOn: ["pivot"] }),
+    )
+    // dispatched at 0 (age 400k) but produced output at 350k -> idle 50k < 300k -> working, not hung
+    const stalls = Orchestrator.detectStall(g, {
+      stallMs: 300_000,
+      nowMs: BASE + 400_000,
+      lastActivityMs: { pivot: BASE + 350_000 },
+    })
+    expect(stalls).toHaveLength(0)
+  })
+
+  test("#1: stalls a task SILENT past stallMs; idleMs reflects silence, ageMs the dispatch age", () => {
+    const g = graph(
+      node({ id: "pivot", status: "running", updatedAt: at(0) }),
+      node({ id: "exploit", status: "planned", dependsOn: ["pivot"] }),
+    )
+    // last output at 50k; now 400k -> idle 350k >= 300k
+    const stalls = Orchestrator.detectStall(g, {
+      stallMs: 300_000,
+      nowMs: BASE + 400_000,
+      lastActivityMs: { pivot: BASE + 50_000 },
+    })
+    expect(stalls).toHaveLength(1)
+    expect(stalls[0]!.idleMs).toBe(350_000)
+    expect(stalls[0]!.ageMs).toBe(400_000)
+  })
+
+  test("#1: operational role gets a larger threshold via roleStallMultiplier", () => {
+    const g = graph(
+      node({ id: "shell", status: "running", updatedAt: at(0), assignedAgent: "post_exploit" }),
+      node({ id: "dep", status: "planned", dependsOn: ["shell"] }),
+    )
+    const opts = { stallMs: 300_000, nowMs: BASE + 600_000, roleStallMultiplier: { post_exploit: 4 } }
+    // idle 600k < 4*300k = 1.2M -> not stalled
+    expect(Orchestrator.detectStall(g, opts)).toHaveLength(0)
+    // past 1.2M -> stalled
+    expect(Orchestrator.detectStall(g, { ...opts, nowMs: BASE + 1_300_000 })).toHaveLength(1)
+  })
+
+  test("#1: sorts most-IDLE first (not most-dispatch-age)", () => {
+    const g = graph(
+      node({ id: "a", status: "running", updatedAt: at(0) }),
+      node({ id: "b", status: "running", updatedAt: at(0) }),
+      node({ id: "da", status: "planned", dependsOn: ["a"] }),
+      node({ id: "db", status: "planned", dependsOn: ["b"] }),
+    )
+    // both dispatched at 0; a last-active 100k (idle 400k), b last-active 300k (idle 200k)
+    const stalls = Orchestrator.detectStall(g, {
+      stallMs: 100_000,
+      nowMs: BASE + 500_000,
+      lastActivityMs: { a: BASE + 100_000, b: BASE + 300_000 },
+    })
+    expect(stalls.map((s) => s.stalled.id)).toEqual(["a", "b"]) // a is more idle
+  })
 })

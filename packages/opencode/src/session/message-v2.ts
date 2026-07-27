@@ -514,6 +514,33 @@ export function parts(messageID: MessageID) {
   })
 }
 
+/**
+ * Batch "last activity" clock per session = MAX(part.time_created). Parts are
+ * written incrementally as a session's subagent works (projector PartUpdated), so
+ * this is a LIVE signal of whether a subagent is still producing output — the
+ * stall-watchdog uses it to tell a WORKING-but-slow task from a genuinely hung one.
+ * Returns sessionID → epoch ms; sessions with no parts are absent from the map.
+ */
+export function lastActivityBySession(sessionIDs: SessionID[]) {
+  return Effect.gen(function* () {
+    const out: Record<string, number> = {}
+    if (sessionIDs.length === 0) return out
+    const { db } = yield* Database.Service
+    for (const sid of sessionIDs) {
+      const row = yield* db
+        .select({ t: PartTable.time_created })
+        .from(PartTable)
+        .where(eq(PartTable.session_id, sid))
+        .orderBy(desc(PartTable.time_created))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+      if (row?.t != null) out[sid] = Number(row.t)
+    }
+    return out
+  })
+}
+
 export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
   const { db } = yield* Database.Service
   const row = yield* db

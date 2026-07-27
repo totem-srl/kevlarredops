@@ -152,8 +152,15 @@ export interface Stall {
   stalled: TaskGraph.TaskNode
   /** Tasks that cannot start because they depend on the stalled task. */
   starvedDependents: TaskGraph.TaskNode[]
-  /** How long the stalled task has been in flight (ms), from its updatedAt. */
+  /** How long the stalled task has been in flight (ms), from its updatedAt (dispatch time). */
   ageMs: number
+  /**
+   * How long the stalled task has been SILENT (ms) — time since its subagent last
+   * produced output. This, not `ageMs`, is what gates a stall: a task that is old
+   * but still emitting tool-calls is WORKING, not hung. Falls back to `ageMs` when
+   * no activity signal is available.
+   */
+  idleMs: number
 }
 
 /**
@@ -169,22 +176,42 @@ export interface Stall {
  * decides). Pure: `nowMs` is supplied by the caller.
  *
  * A task counts as stalled only when (a) it is in flight (dispatched|running),
- * (b) it has been so for at least `stallMs` (its `updatedAt` is set at dispatch and
- * is NOT bumped while running — `computeReadiness` skips non-planned/blocked nodes),
- * AND (c) at least one `planned`/`blocked` task depends on it. Condition (c) scopes
- * wakes to the HARMFUL case: an independent long-running task with no dependents is
- * left alone (no false wake). Sorted oldest-first.
+ * (b) it has been SILENT for at least its threshold — idle time is `nowMs` minus the
+ * subagent's last activity (`lastActivityMs[node.id]`, the MAX part timestamp of its
+ * child session); we fall back to `updatedAt` (dispatch time) only when no activity
+ * signal is available. This is the key fix: a task that is OLD but still emitting
+ * tool-calls is WORKING, not hung — killing it (as the field run did to a reverse
+ * shell at 5 min and an exploit build at 38 min) destroys real progress. Operational
+ * roles get a larger threshold via `roleStallMultiplier` (shell/gadget/tunnel builds
+ * are legitimately slow-and-silent). AND (c) at least one `planned`/`blocked` task
+ * depends on it — scoping wakes to the HARMFUL case (an independent long-runner with
+ * no dependents is left alone). Sorted most-idle-first. Pure: `nowMs` supplied by the
+ * caller.
  */
-export function detectStall(graph: TaskGraph.TaskNodes, opts: { stallMs: number; nowMs: number }): Stall[] {
+export function detectStall(
+  graph: TaskGraph.TaskNodes,
+  opts: {
+    stallMs: number
+    nowMs: number
+    /** nodeId → epoch ms of the subagent's last output (MAX part.time_created). */
+    lastActivityMs?: Record<string, number>
+    /** assignedAgent → multiplier on `stallMs` (operational roles run longer/quieter). */
+    roleStallMultiplier?: Record<string, number>
+  },
+): Stall[] {
   const stalls: Stall[] = []
   for (const node of TaskGraph.getRunning(graph)) {
     const ageMs = opts.nowMs - Date.parse(node.updatedAt)
-    if (!Number.isFinite(ageMs) || ageMs < opts.stallMs) continue
+    const lastSeen = opts.lastActivityMs?.[node.id]
+    // Idle = time since last output; if we have no activity signal, fall back to age.
+    const idleMs = lastSeen !== undefined ? opts.nowMs - lastSeen : ageMs
+    const threshold = opts.stallMs * (opts.roleStallMultiplier?.[node.assignedAgent ?? ""] ?? 1)
+    if (!Number.isFinite(idleMs) || idleMs < threshold) continue
     const starvedDependents = Object.values(graph).filter(
       (t) => (t.status === "planned" || t.status === "blocked") && t.dependsOn.includes(node.id),
     )
     if (starvedDependents.length === 0) continue
-    stalls.push({ stalled: node, starvedDependents, ageMs })
+    stalls.push({ stalled: node, starvedDependents, ageMs: Number.isFinite(ageMs) ? ageMs : idleMs, idleMs })
   }
-  return stalls.sort((a, b) => b.ageMs - a.ageMs)
+  return stalls.sort((a, b) => b.idleMs - a.idleMs)
 }
