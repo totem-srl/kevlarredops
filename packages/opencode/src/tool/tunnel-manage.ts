@@ -134,7 +134,7 @@ function socksVerifyRecipe(localPort: number, target?: string): string[] {
   ]
 }
 
-function buildTunnelCommand(
+export function buildTunnelCommand(
   type: string,
   hostIp: string,
   creds: { user: string; value: string; isKey: boolean } | undefined,

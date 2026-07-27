@@ -136,6 +136,26 @@ function soloBlockedOutput(n: number): string {
     `state_update / read stay available so you can observe and plan. This block clears the moment you dispatch.`
   )
 }
+export type SoloRailAction = { kind: "run" } | { kind: "warn"; count: number } | { kind: "block"; count: number }
+// Pure decision for the anti-solo rail — extracted so it is unit-testable. Given the
+// prior op-count for a session and this tool call, returns the new count + what to do.
+// Non-coordinator or non-operational calls run untouched; a dispatch resets to 0.
+export function soloRailStep(
+  prevCount: number,
+  agent: string,
+  id: string,
+  args: unknown,
+  warn: number,
+  block: number,
+): { count: number; action: SoloRailAction } {
+  if (agent !== COORDINATOR_AGENT) return { count: prevCount, action: { kind: "run" } }
+  if (isDispatchCall(id, args)) return { count: 0, action: { kind: "run" } }
+  if (!OPERATIONAL_TOOL_IDS.has(id)) return { count: prevCount, action: { kind: "run" } }
+  const count = prevCount + 1
+  if (count > block) return { count, action: { kind: "block", count } }
+  if (count > warn) return { count, action: { kind: "warn", count } }
+  return { count, action: { kind: "run" } }
+}
 
 function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadata>(
   id: string,
@@ -162,16 +182,13 @@ function wrap<Parameters extends Schema.Decoder<unknown>, Result extends Metadat
           // #2a anti-solo-takeover rail (coordinator only).
           let soloBanner = ""
           if (ctx.agent === COORDINATOR_AGENT) {
-            if (isDispatchCall(id, args)) {
-              soloOpCount.delete(ctx.sessionID) // delegated -> reset the counter
-            } else if (OPERATIONAL_TOOL_IDS.has(id)) {
-              const n = (soloOpCount.get(ctx.sessionID) ?? 0) + 1
-              soloOpCount.set(ctx.sessionID, n)
-              if (n > SOLO_BLOCK_OPS) {
-                return { title: "Delegate first", metadata: {} as Result, output: soloBlockedOutput(n) }
-              }
-              if (n > SOLO_WARN_OPS) soloBanner = soloDelegateBanner(n)
+            const prev = soloOpCount.get(ctx.sessionID) ?? 0
+            const step = soloRailStep(prev, ctx.agent, id, args, SOLO_WARN_OPS, SOLO_BLOCK_OPS)
+            soloOpCount.set(ctx.sessionID, step.count)
+            if (step.action.kind === "block") {
+              return { title: "Delegate first", metadata: {} as Result, output: soloBlockedOutput(step.action.count) }
             }
+            if (step.action.kind === "warn") soloBanner = soloDelegateBanner(step.action.count)
           }
           const decoded = yield* decode(args).pipe(
             Effect.mapError(
