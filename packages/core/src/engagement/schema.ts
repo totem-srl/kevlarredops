@@ -495,6 +495,55 @@ export function wordlistSummary(usages: readonly WordlistUsage[], hostIp?: strin
   return lines.join("\n")
 }
 
+/**
+ * #1 vector-ledger — the coordinator's PRIMARY strategic lens: a compact ranked
+ * board of attack vectors so it allocates over a SHORT list (live / confirmed /
+ * dead) instead of re-reading a raw multi-host state dump. Per host:
+ *   IP (hostname) [OWNED-root | OWNED-user | recon]  ⚡signal (new progress this turn)
+ *     ! confirmed/exploited vuln not yet converted → FINISH or ESCALATE (never drop)
+ *     ? suspected vuln → candidate
+ *     · open service, no access → untried lead
+ * plus a DEAD list (resolved_vectors status=resolved) = do NOT retry. `recentChanges`
+ * flags which hosts saw new signal, so a still-advancing vector is visibly ALIVE.
+ */
+export function toVectorLedger(state: State, recentChanges: ChangelogEntry[] = []): string | undefined {
+  const hosts = Object.entries(state.hosts)
+  if (hosts.length === 0) return undefined
+  const isRoot = (lvl?: string) => !!lvl && /root|admin|system|super/i.test(lvl)
+  const signalIPs = new Set<string>()
+  for (const c of recentChanges) {
+    for (const [ip] of hosts) if (c.entity_id === ip || c.summary?.includes(ip)) signalIPs.add(ip)
+  }
+  const lines: string[] = [
+    "<vector-ledger> — your strategic board. Allocate over LIVE/untried vectors; FINISH or ESCALATE a confirmed vuln (never drop one that still shows progress); never retry DEAD.",
+  ]
+  for (const [ip, h] of hosts.slice(0, 25)) {
+    const anyAcc = h.access.length > 0
+    const rootAcc = h.access.some((a) => isRoot(a.level))
+    const status = rootAcc ? "OWNED-root" : anyAcc ? "OWNED-user" : h.services.length ? "recon" : "seen"
+    lines.push(`  ${ip}${h.hostname ? ` (${h.hostname})` : ""} [${status}]${signalIPs.has(ip) ? " ⚡signal" : ""}`)
+    for (const v of h.vulns.filter((v) => v.status === "confirmed" || v.status === "exploited").slice(0, 4))
+      lines.push(`     ! ${v.status} — ${v.title}${v.severity ? ` [${v.severity}]` : ""} → finish/escalate`)
+    for (const v of h.vulns.filter((v) => v.status === "suspected" || !v.status).slice(0, 3))
+      lines.push(`     ? suspected — ${v.title}${v.confidence !== undefined ? ` conf:${v.confidence}` : ""}`)
+    if (!anyAcc) {
+      const svc = h.services
+        .filter((s) => !s.state || s.state === "open")
+        .map((s) => `${s.port}/${s.service ?? "?"}`)
+        .slice(0, 8)
+      if (svc.length) lines.push(`     · untried: ${svc.join(", ")}`)
+    }
+  }
+  if (hosts.length > 25) lines.push(`  … +${hosts.length - 25} more hosts (state_query hosts)`)
+  const dead = (state.resolved_vectors ?? []).filter((v) => v.status === "resolved")
+  if (dead.length)
+    lines.push(
+      `  DEAD — do NOT retry: ${dead.slice(0, 10).map((v) => `${v.target}:${v.vector}`).join(" | ")}${dead.length > 10 ? ` +${dead.length - 10}` : ""}`,
+    )
+  lines.push("</vector-ledger>")
+  return lines.join("\n")
+}
+
 export function toDiffContext(entries: ChangelogEntry[], maxEntries = 20): string | undefined {
   if (entries.length === 0) return undefined
   const recent = entries.slice(-maxEntries)

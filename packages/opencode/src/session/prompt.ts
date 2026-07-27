@@ -1392,38 +1392,56 @@ const layer = Layer.effect(
                   // cached static prefix (staticLines below), not this volatile block.
                   if (transitionHint) lines.push("", transitionHint)
 
+                  // #3 subagent-cost: the diff / OODA / full-state blocks are the
+                  // COORDINATOR's strategic view. In the field run they were NOT gated,
+                  // so every focused subagent got the whole multi-host state re-injected
+                  // — and `recentChanges>15` (true almost every turn in a busy run) forced
+                  // a FULL compact-state dump each turn → ~4x tokens + a busted prefix
+                  // cache. A subagent has its task + target in the objective prompt and
+                  // pulls the rest via state_query.
                   let recentChanges: EngagementSchema.ChangelogEntry[] = []
-                  let diffShown = false
-                  const lastTs = yield* engagement.getLastInjectedTimestamp()
-                  if (lastTs) {
-                    recentChanges = yield* engagement.getChangelogSince(lastTs)
-                    const diff = EngagementSchema.toDiffContext(recentChanges)
-                    if (diff) {
-                      lines.push("", diff)
-                      diffShown = true
+                  if (isCoordinator) {
+                    let diffShown = false
+                    const lastTs = yield* engagement.getLastInjectedTimestamp()
+                    if (lastTs) {
+                      recentChanges = yield* engagement.getChangelogSince(lastTs)
+                      const diff = EngagementSchema.toDiffContext(recentChanges)
+                      if (diff) {
+                        lines.push("", diff)
+                        diffShown = true
+                      }
                     }
-                  }
-                  yield* engagement.markInjected()
+                    yield* engagement.markInjected()
 
-                  // C-1 dedup: the diff block above already lists the mutations since
-                  // last turn. Don't also print OODA's "Recent changes" rollup of the
-                  // same set — pass [] so OODA skips it. Coverage/gaps/alerts/sessions/
-                  // segments/tasks/objectives (the unique OODA signal) are still shown.
-                  lines.push("", EngagementSchema.toOODAContext(state, diffShown ? [] : recentChanges))
+                    // C-1 dedup: the diff block already lists the mutations since last
+                    // turn — pass [] so OODA skips its "Recent changes" rollup.
+                    lines.push("", EngagementSchema.toOODAContext(state, diffShown ? [] : recentChanges))
 
-                  const shouldInjectFull = step <= 1 || step % 8 === 0 || recentChanges.length > 15
-                  if (shouldInjectFull) {
-                    lines.push(
-                      "",
-                      "Current engagement state:",
-                      EngagementSchema.toCompactContext(state, 20, { excludeOODAFields: true }),
-                    )
+                    // #1 vector-ledger: the coordinator's PRIMARY strategic lens — a
+                    // compact ranked board of attack vectors (live / confirmed / dead)
+                    // so it decides allocation over a short list, not a raw state dump.
+                    const ledger = EngagementSchema.toVectorLedger(state, recentChanges)
+                    if (ledger) lines.push("", ledger)
+
+                    const shouldInjectFull = step <= 1 || step % 8 === 0 || recentChanges.length > 15
+                    if (shouldInjectFull) {
+                      lines.push(
+                        "",
+                        "Current engagement state:",
+                        EngagementSchema.toCompactContext(state, 20, { excludeOODAFields: true }),
+                      )
+                    } else {
+                      const ss = EngagementSchema.summary(state)
+                      lines.push(
+                        "",
+                        `State summary (full state injected every 8 turns, use state_query for details):`,
+                        `  hosts:${ss.hosts_discovered} compromised:${ss.hosts_compromised} vulns:${ss.vulnerabilities} creds:${ss.credentials} flags:${ss.flags} phase:${ss.current_phase}`,
+                      )
+                    }
                   } else {
-                    const ss = EngagementSchema.summary(state)
                     lines.push(
                       "",
-                      `State summary (full state injected every 8 turns, use state_query for details):`,
-                      `  hosts:${ss.hosts_discovered} compromised:${ss.hosts_compromised} vulns:${ss.vulnerabilities} creds:${ss.credentials} flags:${ss.flags} phase:${ss.current_phase}`,
+                      "Use state_query for host/service/cred/vuln/session details as needed — full engagement state is NOT injected here; your task target is in the objective above.",
                     )
                   }
                   // Real subagent liveness from the background-job registry —
