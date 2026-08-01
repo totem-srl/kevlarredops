@@ -681,11 +681,15 @@ export const ShellTool = Tool.define(
                 if (external.length > 0) {
                   const interactive = process.stdin.isTTY === true
                   if (interactive) {
+                    // Two-button Yes/No: approve adds the target(s) to scope (persists,
+                    // so no re-ask for them) and runs the command; deny skips. No blanket
+                    // "always allow everything" option — each new out-of-scope target is
+                    // the operator's explicit call.
                     const approved = yield* ctx
                       .ask({
                         permission: "scope",
                         patterns: external,
-                        always: ["*"],
+                        always: [],
                         metadata: { scopeExpansion: true, targets: external, command: params.command.slice(0, 200) },
                       })
                       .pipe(
