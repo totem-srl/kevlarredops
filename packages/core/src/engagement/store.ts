@@ -10,6 +10,7 @@ import * as path from "node:path"
 
 const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
 const LAST_FILE = ".last"
+const SELECTED_FILE = ".selected"
 const CHANGELOG_FILE = "changelog.json"
 const DECISIONS_FILE = "decisions.json"
 const AGENT_CONTEXTS_FILE = "agent-contexts.json"
@@ -123,6 +124,12 @@ export interface Interface {
   // Resolved Vectors Ledger (R6 fix)
   readonly addResolvedVector: (vector: EngagementSchema.ResolvedVector) => Effect.Effect<{ created: boolean }>
   readonly getResolvedVectors: (filter?: { target?: string; status?: string }) => Effect.Effect<readonly EngagementSchema.ResolvedVector[]>
+  // Goal
+  readonly setGoal: (text: string) => Effect.Effect<void>
+  readonly updateGoal: (patch: { status?: EngagementSchema.GoalStatus; evidence?: string }) => Effect.Effect<boolean>
+  readonly clearGoal: () => Effect.Effect<void>
+  // TUI engagement selector
+  readonly readSelected: () => Effect.Effect<string | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@pentestcode/EngagementStore") {}
@@ -170,7 +177,7 @@ const layer = Layer.effect(
     const lastInjectedRef = yield* Ref.make<string | undefined>(undefined)
 
     const logChange = (action: string, entityType: string, entityId: string | undefined, summary: string) =>
-      Effect.gen(function* () {
+      Ref.modify(changelogRef, (current) => {
         const entry: EngagementSchema.ChangelogEntry = {
           timestamp: new Date().toISOString(),
           action,
@@ -178,12 +185,11 @@ const layer = Layer.effect(
           entity_id: entityId,
           summary,
         }
-        const current = yield* Ref.get(changelogRef)
         const updated = [...current, entry]
         const trimmed = updated.length > EngagementSchema.CHANGELOG_MAX_ENTRIES
           ? updated.slice(updated.length - EngagementSchema.CHANGELOG_MAX_ENTRIES)
           : updated
-        yield* Ref.set(changelogRef, trimmed)
+        return [undefined as void, trimmed]
       })
 
     const persistChangelogEntries = (name: string, entries: EngagementSchema.ChangelogEntry[]) => {
@@ -301,6 +307,32 @@ const layer = Layer.effect(
         fs.writeFileSync(lastPath, state.name, { encoding: "utf-8", mode: 0o600 })
       })
 
+    const persistCurrent = Effect.gen(function* () {
+      const state = yield* Ref.get(stateRef)
+      if (!state) return
+      yield* persist(state)
+      const entries = yield* Ref.get(changelogRef)
+      persistChangelogEntries(state.name, entries)
+    })
+
+    const persistDecisionsCurrent = Effect.gen(function* () {
+      const state = yield* Ref.get(stateRef)
+      if (!state) return
+      const decisions = yield* Ref.get(decisionsRef)
+      persistDecisions(state.name, decisions)
+      const entries = yield* Ref.get(changelogRef)
+      persistChangelogEntries(state.name, entries)
+    })
+
+    const persistWordlistsCurrent = Effect.gen(function* () {
+      const state = yield* Ref.get(stateRef)
+      if (!state) return
+      const wordlists = yield* Ref.get(wordlistsRef)
+      persistWordlists(state.name, wordlists)
+      const entries = yield* Ref.get(changelogRef)
+      persistChangelogEntries(state.name, entries)
+    })
+
     const readFromDisk = (name: string) =>
       Effect.sync(() => {
         const filePath = stateFilePath(name)
@@ -384,183 +416,239 @@ const layer = Layer.effect(
         }),
 
       addHost: Effect.fn("EngagementStore.addHost")(function* (ip, data) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return { ip, services: [], vulns: [], access: [], notes: [], ...data } as EngagementSchema.Host
-        const existing = current.hosts[ip]
-        let host: EngagementSchema.Host
-        if (existing) {
-          const mergedServices = mergeServices(existing.services, data?.services ?? [])
-          host = {
-            ...existing,
-            ...data,
-            services: mergedServices,
-            vulns: existing.vulns,
-            access: existing.access,
-            notes: existing.notes,
+        const result = yield* Ref.modify(stateRef, (current) => {
+          if (!current) {
+            const fallback = { ip, services: [], vulns: [], access: [], notes: [], ...data } as EngagementSchema.Host
+            return [{ host: fallback, isNew: false, modified: false }, current]
           }
-        } else {
-          host = { ip, services: [], vulns: [], access: [], notes: [], ...data } as EngagementSchema.Host
-          yield* logChange("add_host", "host", ip, `Host ${ip}${data?.hostname ? ` (${data.hostname})` : ""} added, ${host.services.length} services`)
+          const existing = current.hosts[ip]
+          let host: EngagementSchema.Host
+          if (existing) {
+            const mergedServices = mergeServices(existing.services, data?.services ?? [])
+            host = { ...existing, ...data, services: mergedServices, vulns: existing.vulns, access: existing.access, notes: existing.notes }
+          } else {
+            host = { ip, services: [], vulns: [], access: [], notes: [], ...data } as EngagementSchema.Host
+          }
+          return [{ host, isNew: !existing, modified: true }, { ...current, hosts: { ...current.hosts, [ip]: host } }]
+        })
+        if (result.modified) {
+          if (result.isNew) {
+            yield* logChange("add_host", "host", ip, `Host ${ip}${data?.hostname ? ` (${data.hostname})` : ""} added, ${result.host.services.length} services`)
+          }
+          yield* persistCurrent
         }
-        const updated = { ...current, hosts: { ...current.hosts, [ip]: host } }
-        yield* Ref.set(stateRef, updated)
-        return host
+        return result.host
       }),
 
       deleteHost: Effect.fn("EngagementStore.deleteHost")(function* (ip) {
-        const current = yield* Ref.get(stateRef)
-        if (!current || !current.hosts[ip]) return false
-        const { [ip]: _, ...remainingHosts } = current.hosts
-        yield* Ref.set(stateRef, { ...current, hosts: remainingHosts })
-        yield* logChange("delete_host", "host", ip, `Host ${ip} deleted`)
-        return true
+        const deleted = yield* Ref.modify(stateRef, (current) => {
+          if (!current || !current.hosts[ip]) return [false, current]
+          const { [ip]: _, ...remainingHosts } = current.hosts
+          return [true, { ...current, hosts: remainingHosts }]
+        })
+        if (deleted) {
+          yield* logChange("delete_host", "host", ip, `Host ${ip} deleted`)
+          yield* persistCurrent
+        }
+        return deleted
       }),
 
       addVuln: Effect.fn("EngagementStore.addVuln")(function* (hostIp, vuln) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const host = current.hosts[hostIp]
-        if (!host) return
-        const isDupe = host.vulns.some(
-          (v) => v.title === vuln.title && v.service_port === vuln.service_port,
-        )
-        if (isDupe) {
-          const updatedVulns = host.vulns.map((v) =>
-            v.title === vuln.title && v.service_port === vuln.service_port ? { ...v, ...vuln } : v,
+        const action = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return ["skip" as const, current]
+          const host = current.hosts[hostIp]
+          if (!host) return ["skip" as const, current]
+          const isDupe = host.vulns.some(
+            (v) => v.title === vuln.title && v.service_port === vuln.service_port,
           )
-          yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } })
-        } else {
-          yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: [...host.vulns, vuln] } } })
+          if (isDupe) {
+            const updatedVulns = host.vulns.map((v) =>
+              v.title === vuln.title && v.service_port === vuln.service_port ? { ...v, ...vuln } : v,
+            )
+            return ["updated" as const, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } }]
+          }
+          return ["created" as const, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: [...host.vulns, vuln] } } }]
+        })
+        if (action === "skip") return
+        if (action === "created") {
           yield* logChange("add_vuln", "vuln", vuln.id, `[${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title} on ${hostIp}${vuln.confidence !== undefined ? ` conf:${vuln.confidence}` : ""}`)
-          const sevIcon: Record<string, string> = { critical: "!!!", high: "!!", medium: "!", low: ".", info: "i" }
-          const findingLines = [
-            `## ${sevIcon[vuln.severity ?? "medium"] ?? "!"} [${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title}`,
-            `**Time**: ${new Date().toISOString()}`,
-            `**Host**: ${hostIp}${vuln.service_port ? `:${vuln.service_port}` : ""}`,
-            `**Status**: ${vuln.status ?? "suspected"}${vuln.confidence !== undefined ? ` (confidence: ${(vuln.confidence * 100).toFixed(0)}%)` : ""}`,
-            ...(vuln.description ? [`**Description**: ${vuln.description}`] : []),
-            ...(vuln.evidence ? [`**Evidence**: \`${vuln.evidence}\``] : []),
-            ...(vuln.evidence_items?.length ? [
-              `**Evidence Chain**:`,
-              ...vuln.evidence_items.map((e) =>
-                `- \`${e.tool}\`${e.source_agent ? ` (${e.source_agent})` : ""}: ${e.command ?? "(no command)"}${e.verification_status ? ` [${e.verification_status}]` : ""}`
-              ),
-            ] : []),
-            `---`,
-          ]
-          appendFinding(current.name, findingLines.join("\n"))
+          const state = yield* Ref.get(stateRef)
+          if (state) {
+            const sevIcon: Record<string, string> = { critical: "!!!", high: "!!", medium: "!", low: ".", info: "i" }
+            const findingLines = [
+              `## ${sevIcon[vuln.severity ?? "medium"] ?? "!"} [${(vuln.severity ?? "medium").toUpperCase()}] ${vuln.title}`,
+              `**Time**: ${new Date().toISOString()}`,
+              `**Host**: ${hostIp}${vuln.service_port ? `:${vuln.service_port}` : ""}`,
+              `**Status**: ${vuln.status ?? "suspected"}${vuln.confidence !== undefined ? ` (confidence: ${(vuln.confidence * 100).toFixed(0)}%)` : ""}`,
+              ...(vuln.description ? [`**Description**: ${vuln.description}`] : []),
+              ...(vuln.evidence ? [`**Evidence**: \`${vuln.evidence}\``] : []),
+              ...(vuln.evidence_items?.length ? [
+                `**Evidence Chain**:`,
+                ...vuln.evidence_items.map((e) =>
+                  `- \`${e.tool}\`${e.source_agent ? ` (${e.source_agent})` : ""}: ${e.command ?? "(no command)"}${e.verification_status ? ` [${e.verification_status}]` : ""}`
+                ),
+              ] : []),
+              `---`,
+            ]
+            appendFinding(state.name, findingLines.join("\n"))
+          }
         }
+        yield* persistCurrent
       }),
 
       updateVuln: Effect.fn("EngagementStore.updateVuln")(function* (hostIp, vulnId, patch) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const host = current.hosts[hostIp]
-        if (!host) return false
-        const idx = host.vulns.findIndex((v) => v.id === vulnId)
-        if (idx === -1) return false
-        const updatedVulns = [...host.vulns]
-        updatedVulns[idx] = { ...updatedVulns[idx]!, ...patch }
-        yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } })
-        yield* logChange("update_vuln", "vuln", vulnId, `Vuln ${vulnId} on ${hostIp} updated: ${Object.keys(patch).join(", ")}`)
-        return true
+        const found = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const host = current.hosts[hostIp]
+          if (!host) return [false, current]
+          const idx = host.vulns.findIndex((v) => v.id === vulnId)
+          if (idx === -1) return [false, current]
+          const updatedVulns = [...host.vulns]
+          updatedVulns[idx] = { ...updatedVulns[idx]!, ...patch }
+          return [true, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: updatedVulns } } }]
+        })
+        if (found) {
+          yield* logChange("update_vuln", "vuln", vulnId, `Vuln ${vulnId} on ${hostIp} updated: ${Object.keys(patch).join(", ")}`)
+          yield* persistCurrent
+        }
+        return found
       }),
 
       deleteVuln: Effect.fn("EngagementStore.deleteVuln")(function* (hostIp, vulnId) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const host = current.hosts[hostIp]
-        if (!host) return false
-        const before = host.vulns.length
-        const filtered = host.vulns.filter((v) => v.id !== vulnId)
-        if (filtered.length === before) return false
-        yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: filtered } } })
-        yield* logChange("delete_vuln", "vuln", vulnId, `Vuln ${vulnId} deleted from ${hostIp}`)
-        return true
+        const deleted = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const host = current.hosts[hostIp]
+          if (!host) return [false, current]
+          const filtered = host.vulns.filter((v) => v.id !== vulnId)
+          if (filtered.length === host.vulns.length) return [false, current]
+          return [true, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, vulns: filtered } } }]
+        })
+        if (deleted) {
+          yield* logChange("delete_vuln", "vuln", vulnId, `Vuln ${vulnId} deleted from ${hostIp}`)
+          yield* persistCurrent
+        }
+        return deleted
       }),
 
       addCredential: Effect.fn("EngagementStore.addCredential")(function* (id, cred) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const isNew = !current.credentials[id]
-        yield* Ref.set(stateRef, {
-          ...current,
-          credentials: { ...current.credentials, [id]: { ...cred, id } },
+        const isNew = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const wasNew = !current.credentials[id]
+          return [wasNew, { ...current, credentials: { ...current.credentials, [id]: { ...cred, id } } }]
         })
         if (isNew) {
           yield* logChange("add_credential", "credential", id, `Credential ${cred.username ?? id} (${cred.cred_type ?? "password"})${cred.confidence !== undefined ? ` conf:${cred.confidence}` : ""}`)
-          const findingLines = [
-            `## Credential Found: ${cred.username ?? id}`,
-            `**Time**: ${new Date().toISOString()}`,
-            `**Type**: ${cred.cred_type ?? "password"}`,
-            `**Source**: ${cred.source ?? "unknown"}`,
-            ...(cred.valid_for?.length ? [`**Valid For**: ${cred.valid_for.join(", ")}`] : []),
-            ...(cred.confidence !== undefined ? [`**Confidence**: ${(cred.confidence * 100).toFixed(0)}%`] : []),
-            ...(cred.domain ? [`**Domain**: ${cred.domain}`] : []),
-            `---`,
-          ]
-          appendFinding(current.name, findingLines.join("\n"))
+          const state = yield* Ref.get(stateRef)
+          if (state) {
+            const findingLines = [
+              `## Credential Found: ${cred.username ?? id}`,
+              `**Time**: ${new Date().toISOString()}`,
+              `**Type**: ${cred.cred_type ?? "password"}`,
+              `**Source**: ${cred.source ?? "unknown"}`,
+              ...(cred.valid_for?.length ? [`**Valid For**: ${cred.valid_for.join(", ")}`] : []),
+              ...(cred.confidence !== undefined ? [`**Confidence**: ${(cred.confidence * 100).toFixed(0)}%`] : []),
+              ...(cred.domain ? [`**Domain**: ${cred.domain}`] : []),
+              `---`,
+            ]
+            appendFinding(state.name, findingLines.join("\n"))
+          }
         }
+        yield* persistCurrent
       }),
 
       deleteCredential: Effect.fn("EngagementStore.deleteCredential")(function* (id) {
-        const current = yield* Ref.get(stateRef)
-        if (!current || !current.credentials[id]) return false
-        const { [id]: _, ...remaining } = current.credentials
-        yield* Ref.set(stateRef, { ...current, credentials: remaining })
-        yield* logChange("delete_credential", "credential", id, `Credential ${id} deleted`)
-        return true
+        const deleted = yield* Ref.modify(stateRef, (current) => {
+          if (!current || !current.credentials[id]) return [false, current]
+          const { [id]: _, ...remaining } = current.credentials
+          return [true, { ...current, credentials: remaining }]
+        })
+        if (deleted) {
+          yield* logChange("delete_credential", "credential", id, `Credential ${id} deleted`)
+          yield* persistCurrent
+        }
+        return deleted
       }),
 
       addAccess: Effect.fn("EngagementStore.addAccess")(function* (hostIp, access) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const host = current.hosts[hostIp]
-        if (!host) return
-        const isDupe = host.access.some(
-          (a) => a.access_type === access.access_type && a.username === access.username,
-        )
-        if (isDupe) {
-          const updatedAccess = host.access.map((a) =>
-            a.access_type === access.access_type && a.username === access.username ? { ...a, ...access } : a,
+        const action = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return ["skip" as const, current]
+          const host = current.hosts[hostIp]
+          if (!host) return ["skip" as const, current]
+          const isDupe = host.access.some(
+            (a) => a.access_type === access.access_type && a.username === access.username,
           )
-          yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: updatedAccess } } })
-        } else {
-          yield* Ref.set(stateRef, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: [...host.access, access] } } })
+          if (isDupe) {
+            const updatedAccess = host.access.map((a) =>
+              a.access_type === access.access_type && a.username === access.username ? { ...a, ...access } : a,
+            )
+            return ["updated" as const, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: updatedAccess } } }]
+          }
+          return ["created" as const, { ...current, hosts: { ...current.hosts, [hostIp]: { ...host, access: [...host.access, access] } } }]
+        })
+        if (action === "skip") return
+        if (action === "created") {
           yield* logChange("add_access", "access", hostIp, `${access.access_type} as ${access.username} (${access.level ?? "user"}) on ${hostIp}${access.confidence !== undefined ? ` conf:${access.confidence}` : ""}`)
-          const findingLines = [
-            `## Access Gained: ${hostIp}`,
-            `**Time**: ${new Date().toISOString()}`,
-            `**Type**: ${access.access_type}`,
-            `**User**: ${access.username}`,
-            `**Level**: ${access.level ?? "user"}`,
-            ...(access.details ? [`**Details**: ${access.details}`] : []),
-            ...(access.credential_id ? [`**Credential**: ${access.credential_id}`] : []),
-            `---`,
-          ]
-          appendFinding(current.name, findingLines.join("\n"))
+          const state = yield* Ref.get(stateRef)
+          if (state) {
+            const findingLines = [
+              `## Access Gained: ${hostIp}`,
+              `**Time**: ${new Date().toISOString()}`,
+              `**Type**: ${access.access_type}`,
+              `**User**: ${access.username}`,
+              `**Level**: ${access.level ?? "user"}`,
+              ...(access.details ? [`**Details**: ${access.details}`] : []),
+              ...(access.credential_id ? [`**Credential**: ${access.credential_id}`] : []),
+              `---`,
+            ]
+            appendFinding(state.name, findingLines.join("\n"))
+          }
         }
+        yield* persistCurrent
       }),
 
       setPhase: Effect.fn("EngagementStore.setPhase")(function* (phase) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const oldPhase = current.current_phase
-        yield* Ref.set(stateRef, { ...current, current_phase: phase })
-        yield* logChange("set_phase", "phase", phase, `Phase: ${oldPhase} -> ${phase}`)
+        const oldPhase = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [undefined, current]
+          return [current.current_phase, { ...current, current_phase: phase }]
+        })
+        if (oldPhase !== undefined) {
+          yield* logChange("set_phase", "phase", phase, `Phase: ${oldPhase} -> ${phase}`)
+          yield* persistCurrent
+        }
       }),
 
       setMode: Effect.fn("EngagementStore.setMode")(function* (mode) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        yield* Ref.set(stateRef, { ...current, mode })
-        yield* logChange("set_mode", "mode", mode, `Mode: ${mode}`)
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          return [true, { ...current, mode }]
+        })
+        if (modified) {
+          yield* logChange("set_mode", "mode", mode, `Mode: ${mode}`)
+          yield* persistCurrent
+        }
       }),
 
       updateScope: Effect.fn("EngagementStore.updateScope")(function* (scope) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        yield* Ref.set(stateRef, { ...current, scope: { ...current.scope, ...scope } })
+        const result = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [{ modified: false, warned: false }, current]
+          const patch: Record<string, unknown> = {}
+          let warned = false
+          if (scope.targets) {
+            warned = true
+          }
+          if (scope.excludes) patch.excludes = scope.excludes
+          if (scope.discovered_targets) patch.discovered_targets = scope.discovered_targets
+          if (scope.notes !== undefined) patch.notes = scope.notes
+          if (Object.keys(patch).length === 0 && !warned) return [{ modified: false, warned: false }, current]
+          return [{ modified: Object.keys(patch).length > 0, warned }, { ...current, scope: { ...current.scope, ...patch } as EngagementSchema.Scope }]
+        })
+        if (result.modified) {
+          yield* logChange("update_scope", "scope", "scope", `Scope updated`)
+          yield* persistCurrent
+        }
+        if (result.warned) {
+          yield* logChange("update_scope_rejected", "scope", "scope", `Rejected targets modification — use discovered_targets`)
+        }
       }),
 
       getTaskGraph: Effect.fn("EngagementStore.getTaskGraph")(function* () {
@@ -570,9 +658,11 @@ const layer = Layer.effect(
       }),
 
       setTaskGraph: Effect.fn("EngagementStore.setTaskGraph")(function* (tasks) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        yield* Ref.set(stateRef, { ...current, task_graph: tasks as unknown as Record<string, unknown> })
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          return [true, { ...current, task_graph: tasks as unknown as Record<string, unknown> }]
+        })
+        if (modified) yield* persistCurrent
       }),
 
       modifyTaskGraph: Effect.fn("EngagementStore.modifyTaskGraph")(function* (fn) {
@@ -585,48 +675,59 @@ const layer = Layer.effect(
       }),
 
       setDomain: Effect.fn("EngagementStore.setDomain")(function* (domain) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        yield* Ref.set(stateRef, { ...current, domain })
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          return [true, { ...current, domain }]
+        })
+        if (modified) yield* persistCurrent
       }),
 
       updateDomain: Effect.fn("EngagementStore.updateDomain")(function* (patch) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const existing = current.domain ?? { domain_name: "" } as EngagementSchema.DomainState
-        yield* Ref.set(stateRef, { ...current, domain: { ...existing, ...patch } as EngagementSchema.DomainState })
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.domain ?? { domain_name: "" } as EngagementSchema.DomainState
+          return [true, { ...current, domain: { ...existing, ...patch } as EngagementSchema.DomainState }]
+        })
+        if (modified) yield* persistCurrent
       }),
 
       addObjective: Effect.fn("EngagementStore.addObjective")(function* (objective) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const objectives = current.objectives ?? {}
-        yield* Ref.set(stateRef, { ...current, objectives: { ...objectives, [objective.id]: objective } })
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const objectives = current.objectives ?? {}
+          return [true, { ...current, objectives: { ...objectives, [objective.id]: objective } }]
+        })
+        if (modified) yield* persistCurrent
       }),
 
       updateObjective: Effect.fn("EngagementStore.updateObjective")(function* (id, patch) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const objectives = current.objectives ?? {}
-        const existing = objectives[id]
-        if (!existing) return
-        yield* Ref.set(stateRef, { ...current, objectives: { ...objectives, [id]: { ...existing, ...patch } } })
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const objectives = current.objectives ?? {}
+          if (!objectives[id]) return [false, current]
+          return [true, { ...current, objectives: { ...objectives, [id]: { ...objectives[id]!, ...patch } } }]
+        })
+        if (modified) yield* persistCurrent
       }),
 
       completeObjective: Effect.fn("EngagementStore.completeObjective")(function* (id, evidence) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const objectives = current.objectives ?? {}
-        const existing = objectives[id]
-        if (!existing) return
-        yield* Ref.set(stateRef, {
-          ...current,
-          objectives: {
-            ...objectives,
-            [id]: { ...existing, status: "completed" as const, ...(evidence !== undefined ? { evidence } : {}) },
-          },
+        const title = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [undefined, current]
+          const objectives = current.objectives ?? {}
+          const existing = objectives[id]
+          if (!existing) return [undefined, current]
+          return [existing.title, {
+            ...current,
+            objectives: {
+              ...objectives,
+              [id]: { ...existing, status: "completed" as const, ...(evidence !== undefined ? { evidence } : {}) },
+            },
+          }]
         })
-        yield* logChange("complete_objective", "objective", id, `Objective "${existing.title}" completed`)
+        if (title !== undefined) {
+          yield* logChange("complete_objective", "objective", id, `Objective "${title}" completed`)
+          yield* persistCurrent
+        }
       }),
 
       getChangelog: Effect.fn("EngagementStore.getChangelog")(function* (since, limit) {
@@ -654,16 +755,20 @@ const layer = Layer.effect(
       getLastInjectedTimestamp: () => Ref.get(lastInjectedRef),
 
       addRelationship: Effect.fn("EngagementStore.addRelationship")(function* (rel) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.relationships ?? []
-        const isDupe = existing.some(
-          (r) => r.source_id === rel.source_id && r.rel_type === rel.rel_type && r.target_id === rel.target_id,
-        )
-        if (isDupe) return false
-        yield* Ref.set(stateRef, { ...current, relationships: [...existing, rel] })
-        yield* logChange("add_relationship", "relationship", `${rel.source_id}->${rel.target_id}`, `${rel.source_type}:${rel.source_id} --[${rel.rel_type}]--> ${rel.target_type}:${rel.target_id}`)
-        return true
+        const added = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.relationships ?? []
+          const isDupe = existing.some(
+            (r) => r.source_id === rel.source_id && r.rel_type === rel.rel_type && r.target_id === rel.target_id,
+          )
+          if (isDupe) return [false, current]
+          return [true, { ...current, relationships: [...existing, rel] }]
+        })
+        if (added) {
+          yield* logChange("add_relationship", "relationship", `${rel.source_id}->${rel.target_id}`, `${rel.source_type}:${rel.source_id} --[${rel.rel_type}]--> ${rel.target_type}:${rel.target_id}`)
+          yield* persistCurrent
+        }
+        return added
       }),
 
       getRelationships: Effect.fn("EngagementStore.getRelationships")(function* (filter) {
@@ -682,38 +787,48 @@ const layer = Layer.effect(
       }),
 
       deleteRelationship: Effect.fn("EngagementStore.deleteRelationship")(function* (sourceId, relType, targetId) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.relationships ?? []
-        const filtered = existing.filter(
-          (r) => !(r.source_id === sourceId && r.rel_type === relType && r.target_id === targetId),
-        )
-        if (filtered.length === existing.length) return false
-        yield* Ref.set(stateRef, { ...current, relationships: filtered })
-        yield* logChange("delete_relationship", "relationship", `${sourceId}->${targetId}`, `Deleted ${relType} edge`)
-        return true
+        const deleted = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.relationships ?? []
+          const filtered = existing.filter(
+            (r) => !(r.source_id === sourceId && r.rel_type === relType && r.target_id === targetId),
+          )
+          if (filtered.length === existing.length) return [false, current]
+          return [true, { ...current, relationships: filtered }]
+        })
+        if (deleted) {
+          yield* logChange("delete_relationship", "relationship", `${sourceId}->${targetId}`, `Deleted ${relType} edge`)
+          yield* persistCurrent
+        }
+        return deleted
       }),
 
       // --- Decision Memory ---
       addDecision: Effect.fn("EngagementStore.addDecision")(function* (decision) {
-        const current = yield* Ref.get(decisionsRef)
-        const updated = [...current, decision]
-        const trimmed = updated.length > EngagementSchema.DECISIONS_MAX_ENTRIES
-          ? updated.slice(updated.length - EngagementSchema.DECISIONS_MAX_ENTRIES)
-          : updated
-        yield* Ref.set(decisionsRef, trimmed)
+        yield* Ref.modify(decisionsRef, (current) => {
+          const updated = [...current, decision]
+          const trimmed = updated.length > EngagementSchema.DECISIONS_MAX_ENTRIES
+            ? updated.slice(updated.length - EngagementSchema.DECISIONS_MAX_ENTRIES)
+            : updated
+          return [undefined as void, trimmed]
+        })
         yield* logChange("add_decision", "decision", decision.id, `[${decision.phase}] ${decision.decision}`)
+        yield* persistDecisionsCurrent
       }),
 
       updateDecisionOutcome: Effect.fn("EngagementStore.updateDecisionOutcome")(function* (id, outcome, notes) {
-        const current = yield* Ref.get(decisionsRef)
-        const idx = current.findIndex((d) => d.id === id)
-        if (idx === -1) return false
-        const updated = [...current]
-        updated[idx] = { ...updated[idx]!, outcome: outcome as EngagementSchema.DecisionOutcome, ...(notes ? { outcome_notes: notes } : {}) }
-        yield* Ref.set(decisionsRef, updated)
-        yield* logChange("update_decision", "decision", id, `Outcome: ${outcome}${notes ? ` — ${notes}` : ""}`)
-        return true
+        const found = yield* Ref.modify(decisionsRef, (current) => {
+          const idx = current.findIndex((d) => d.id === id)
+          if (idx === -1) return [false, current]
+          const updated = [...current]
+          updated[idx] = { ...updated[idx]!, outcome: outcome as EngagementSchema.DecisionOutcome, ...(notes ? { outcome_notes: notes } : {}) }
+          return [true, updated]
+        })
+        if (found) {
+          yield* logChange("update_decision", "decision", id, `Outcome: ${outcome}${notes ? ` — ${notes}` : ""}`)
+          yield* persistDecisionsCurrent
+        }
+        return found
       }),
 
       getDecisions: Effect.fn("EngagementStore.getDecisions")(function* (limit) {
@@ -723,37 +838,40 @@ const layer = Layer.effect(
 
       // --- Alert Queue ---
       addAlert: Effect.fn("EngagementStore.addAlert")(function* (alert) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const existing = current.alerts ?? []
-        // Expire old alerts first
-        const now = Date.now()
-        const active = existing.filter((a) => {
-          if (a.acknowledged) return false
-          const ttl = (a.ttl_minutes ?? EngagementSchema.ALERTS_DEFAULT_TTL_MINUTES) * 60 * 1000
-          return now - new Date(a.timestamp).getTime() < ttl
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.alerts ?? []
+          const now = Date.now()
+          const active = existing.filter((a) => {
+            if (a.acknowledged) return false
+            const ttl = (a.ttl_minutes ?? EngagementSchema.ALERTS_DEFAULT_TTL_MINUTES) * 60 * 1000
+            return now - new Date(a.timestamp).getTime() < ttl
+          })
+          const capped = active.length >= EngagementSchema.ALERTS_MAX_ACTIVE
+            ? [...active.slice(1), alert]
+            : [...active, alert]
+          return [true, { ...current, alerts: capped }]
         })
-        const capped = active.length >= EngagementSchema.ALERTS_MAX_ACTIVE
-          ? [...active.slice(1), alert]
-          : [...active, alert]
-        yield* Ref.set(stateRef, { ...current, alerts: capped })
+        if (!modified) return
         if (alert.priority === "interrupt") {
-          const queue = yield* Ref.get(interruptQueueRef)
-          yield* Ref.set(interruptQueueRef, [...queue, alert])
+          yield* Ref.modify(interruptQueueRef, (queue) => [undefined as void, [...queue, alert]])
         }
         yield* logChange("add_alert", "alert", alert.id, `[${alert.severity.toUpperCase()}]${alert.priority === "interrupt" ? " [INTERRUPT]" : ""} ${alert.title}${alert.source_agent ? ` from:${alert.source_agent}` : ""}`)
+        yield* persistCurrent
       }),
 
       acknowledgeAlert: Effect.fn("EngagementStore.acknowledgeAlert")(function* (id) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.alerts ?? []
-        const idx = existing.findIndex((a) => a.id === id)
-        if (idx === -1) return false
-        const updated = [...existing]
-        updated[idx] = { ...updated[idx]!, acknowledged: true }
-        yield* Ref.set(stateRef, { ...current, alerts: updated })
-        return true
+        const found = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.alerts ?? []
+          const idx = existing.findIndex((a) => a.id === id)
+          if (idx === -1) return [false, current]
+          const updated = [...existing]
+          updated[idx] = { ...updated[idx]!, acknowledged: true }
+          return [true, { ...current, alerts: updated }]
+        })
+        if (found) yield* persistCurrent
+        return found
       }),
 
       getActiveAlerts: Effect.fn("EngagementStore.getActiveAlerts")(function* () {
@@ -764,95 +882,115 @@ const layer = Layer.effect(
 
       // --- Live Sessions ---
       addLiveSession: Effect.fn("EngagementStore.addLiveSession")(function* (session) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const existing = current.live_sessions ?? []
-        const isDupe = existing.some((s) => s.id === session.id)
-        if (isDupe) {
-          const updated = existing.map((s) => s.id === session.id ? { ...s, ...session } : s)
-          yield* Ref.set(stateRef, { ...current, live_sessions: updated })
-        } else {
-          yield* Ref.set(stateRef, { ...current, live_sessions: [...existing, session] })
+        const isNew = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.live_sessions ?? []
+          const isDupe = existing.some((s) => s.id === session.id)
+          if (isDupe) {
+            const updated = existing.map((s) => s.id === session.id ? { ...s, ...session } : s)
+            return [false, { ...current, live_sessions: updated }]
+          }
+          return [true, { ...current, live_sessions: [...existing, session] }]
+        })
+        if (isNew) {
           yield* logChange("add_session", "live_session", session.id, `${session.session_type} on ${session.host_ip}${session.port ? `:${session.port}` : ""} as ${session.username ?? "?"}`)
         }
+        yield* persistCurrent
       }),
 
       addArtifact: Effect.fn("EngagementStore.addArtifact")(function* (artifact) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const existing = current.artifacts ?? []
-        // dedup by id OR path — a weapon at a given path is the same artifact
-        const idx = existing.findIndex((a) => a.id === artifact.id || a.path === artifact.path)
-        if (idx !== -1) {
-          const updated = [...existing]
-          updated[idx] = { ...updated[idx]!, ...artifact }
-          yield* Ref.set(stateRef, { ...current, artifacts: updated })
-        } else {
+        const isNew = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.artifacts ?? []
+          const idx = existing.findIndex((a) => a.id === artifact.id || a.path === artifact.path)
+          if (idx !== -1) {
+            const updated = [...existing]
+            updated[idx] = { ...updated[idx]!, ...artifact }
+            return [false, { ...current, artifacts: updated }]
+          }
           const next = [...existing, artifact].slice(-EngagementSchema.ARTIFACTS_MAX)
-          yield* Ref.set(stateRef, { ...current, artifacts: next })
+          return [true, { ...current, artifacts: next }]
+        })
+        if (isNew) {
           yield* logChange("add_artifact", "artifact", artifact.id, `${artifact.type}: ${artifact.name} @ ${artifact.path}`)
         }
+        yield* persistCurrent
       }),
 
       updateLiveSession: Effect.fn("EngagementStore.updateLiveSession")(function* (id, patch) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.live_sessions ?? []
-        const idx = existing.findIndex((s) => s.id === id)
-        if (idx === -1) return false
-        const updated = [...existing]
-        updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.LiveSession
-        yield* Ref.set(stateRef, { ...current, live_sessions: updated })
-        return true
+        const found = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.live_sessions ?? []
+          const idx = existing.findIndex((s) => s.id === id)
+          if (idx === -1) return [false, current]
+          const updated = [...existing]
+          updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.LiveSession
+          return [true, { ...current, live_sessions: updated }]
+        })
+        if (found) yield* persistCurrent
+        return found
       }),
 
       removeLiveSession: Effect.fn("EngagementStore.removeLiveSession")(function* (id) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.live_sessions ?? []
-        const filtered = existing.filter((s) => s.id !== id)
-        if (filtered.length === existing.length) return false
-        yield* Ref.set(stateRef, { ...current, live_sessions: filtered })
-        yield* logChange("remove_session", "live_session", id, `Session ${id} removed`)
-        return true
+        const removed = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.live_sessions ?? []
+          const filtered = existing.filter((s) => s.id !== id)
+          if (filtered.length === existing.length) return [false, current]
+          return [true, { ...current, live_sessions: filtered }]
+        })
+        if (removed) {
+          yield* logChange("remove_session", "live_session", id, `Session ${id} removed`)
+          yield* persistCurrent
+        }
+        return removed
       }),
 
       // --- Network Segments ---
       addNetworkSegment: Effect.fn("EngagementStore.addNetworkSegment")(function* (segment) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        const existing = current.network_segments ?? []
-        const isDupe = existing.some((s) => s.id === segment.id)
-        if (isDupe) {
-          const updated = existing.map((s) => s.id === segment.id ? { ...s, ...segment } : s)
-          yield* Ref.set(stateRef, { ...current, network_segments: updated })
-        } else {
-          yield* Ref.set(stateRef, { ...current, network_segments: [...existing, segment] })
+        const isNew = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.network_segments ?? []
+          const isDupe = existing.some((s) => s.id === segment.id)
+          if (isDupe) {
+            const updated = existing.map((s) => s.id === segment.id ? { ...s, ...segment } : s)
+            return [false, { ...current, network_segments: updated }]
+          }
+          return [true, { ...current, network_segments: [...existing, segment] }]
+        })
+        if (isNew) {
           yield* logChange("add_segment", "network_segment", segment.id, `${segment.cidr}${segment.vlan !== undefined ? ` VLAN:${segment.vlan}` : ""}${segment.pivot_host ? ` via ${segment.pivot_host}` : ""}`)
         }
+        yield* persistCurrent
       }),
 
       updateNetworkSegment: Effect.fn("EngagementStore.updateNetworkSegment")(function* (id, patch) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.network_segments ?? []
-        const idx = existing.findIndex((s) => s.id === id)
-        if (idx === -1) return false
-        const updated = [...existing]
-        updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.NetworkSegment
-        yield* Ref.set(stateRef, { ...current, network_segments: updated })
-        return true
+        const found = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.network_segments ?? []
+          const idx = existing.findIndex((s) => s.id === id)
+          if (idx === -1) return [false, current]
+          const updated = [...existing]
+          updated[idx] = { ...updated[idx]!, ...patch } as EngagementSchema.NetworkSegment
+          return [true, { ...current, network_segments: updated }]
+        })
+        if (found) yield* persistCurrent
+        return found
       }),
 
       removeNetworkSegment: Effect.fn("EngagementStore.removeNetworkSegment")(function* (id) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return false
-        const existing = current.network_segments ?? []
-        const filtered = existing.filter((s) => s.id !== id)
-        if (filtered.length === existing.length) return false
-        yield* Ref.set(stateRef, { ...current, network_segments: filtered })
-        yield* logChange("remove_segment", "network_segment", id, `Segment ${id} removed`)
-        return true
+        const removed = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const existing = current.network_segments ?? []
+          const filtered = existing.filter((s) => s.id !== id)
+          if (filtered.length === existing.length) return [false, current]
+          return [true, { ...current, network_segments: filtered }]
+        })
+        if (removed) {
+          yield* logChange("remove_segment", "network_segment", id, `Segment ${id} removed`)
+          yield* persistCurrent
+        }
+        return removed
       }),
 
       // --- Agent Context Carry ---
@@ -900,18 +1038,22 @@ const layer = Layer.effect(
 
       // --- Wordlist Usage Tracking ---
       addWordlistUsage: Effect.fn("EngagementStore.addWordlistUsage")(function* (usage) {
-        const current = yield* Ref.get(wordlistsRef)
-        const isDupe = current.some(
-          (w) => w.host_ip === usage.host_ip && w.port === usage.port && w.tool_type === usage.tool_type && w.wordlist_path === usage.wordlist_path,
-        )
-        if (isDupe) return false
-        const updated = [...current, usage]
-        const trimmed = updated.length > EngagementSchema.WORDLISTS_MAX_ENTRIES
-          ? updated.slice(updated.length - EngagementSchema.WORDLISTS_MAX_ENTRIES)
-          : updated
-        yield* Ref.set(wordlistsRef, trimmed)
-        yield* logChange("record_wordlist", "wordlist", `${usage.host_ip}:${usage.port}`, `${usage.tool_type}: ${usage.wordlist_path}`)
-        return true
+        const added = yield* Ref.modify(wordlistsRef, (current) => {
+          const isDupe = current.some(
+            (w) => w.host_ip === usage.host_ip && w.port === usage.port && w.tool_type === usage.tool_type && w.wordlist_path === usage.wordlist_path,
+          )
+          if (isDupe) return [false, current]
+          const updated = [...current, usage]
+          const trimmed = updated.length > EngagementSchema.WORDLISTS_MAX_ENTRIES
+            ? updated.slice(updated.length - EngagementSchema.WORDLISTS_MAX_ENTRIES)
+            : updated
+          return [true, trimmed]
+        })
+        if (added) {
+          yield* logChange("record_wordlist", "wordlist", `${usage.host_ip}:${usage.port}`, `${usage.tool_type}: ${usage.wordlist_path}`)
+          yield* persistWordlistsCurrent
+        }
+        return added
       }),
 
       getWordlistUsages: Effect.fn("EngagementStore.getWordlistUsages")(function* (filter) {
@@ -933,52 +1075,57 @@ const layer = Layer.effect(
 
       // --- Pause Behavior ---
       setPauseBehavior: Effect.fn("EngagementStore.setPauseBehavior")(function* (behavior) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return
-        yield* Ref.set(stateRef, { ...current, pause_on_finding: behavior })
-        yield* logChange("set_pause", "pause", behavior, `Pause on finding: ${behavior}`)
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          return [true, { ...current, pause_on_finding: behavior }]
+        })
+        if (modified) {
+          yield* logChange("set_pause", "pause", behavior, `Pause on finding: ${behavior}`)
+          yield* persistCurrent
+        }
       }),
 
       addResolvedVector: Effect.fn("EngagementStore.addResolvedVector")(function* (vector) {
-        const current = yield* Ref.get(stateRef)
-        if (!current) return { created: false }
-        const existing = current.resolved_vectors ?? []
-        // Dedup by (target, vector): a repeat probe bumps attempts and promotes status.
-        const idx = existing.findIndex(
-          (v) => v.target === vector.target && v.vector === vector.vector,
-        )
-        let next: EngagementSchema.ResolvedVector[]
-        let created: boolean
-        if (idx >= 0) {
-          const prev = existing[idx]!
-          const merged: EngagementSchema.ResolvedVector = {
-            ...prev,
-            status: vector.status,
-            timestamp: vector.timestamp,
-            attempts: (prev.attempts ?? 1) + 1,
-            tested_by: vector.tested_by ?? prev.tested_by,
-            evidence: vector.evidence ?? prev.evidence,
-            revisit_when: vector.revisit_when ?? prev.revisit_when,
-            attempt_log: mergeAttemptLog(prev.attempt_log, vector.attempt_log),
+        const result = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [{ created: false }, current]
+          const existing = current.resolved_vectors ?? []
+          const idx = existing.findIndex(
+            (v) => v.target === vector.target && v.vector === vector.vector,
+          )
+          let next: EngagementSchema.ResolvedVector[]
+          let created: boolean
+          if (idx >= 0) {
+            const prev = existing[idx]!
+            const merged: EngagementSchema.ResolvedVector = {
+              ...prev,
+              status: vector.status,
+              timestamp: vector.timestamp,
+              attempts: (prev.attempts ?? 1) + 1,
+              tested_by: vector.tested_by ?? prev.tested_by,
+              evidence: vector.evidence ?? prev.evidence,
+              revisit_when: vector.revisit_when ?? prev.revisit_when,
+              attempt_log: mergeAttemptLog(prev.attempt_log, vector.attempt_log),
+            }
+            next = [...existing]
+            next[idx] = merged
+            created = false
+          } else {
+            next = [...existing, { ...vector, attempts: vector.attempts ?? 1, attempt_log: mergeAttemptLog(undefined, vector.attempt_log) }]
+            created = true
           }
-          next = [...existing]
-          next[idx] = merged
-          created = false
-        } else {
-          next = [...existing, { ...vector, attempts: vector.attempts ?? 1, attempt_log: mergeAttemptLog(undefined, vector.attempt_log) }]
-          created = true
-        }
-        const trimmed = next.length > EngagementSchema.RESOLVED_VECTORS_MAX
-          ? next.slice(next.length - EngagementSchema.RESOLVED_VECTORS_MAX)
-          : next
-        yield* Ref.set(stateRef, { ...current, resolved_vectors: trimmed })
+          const trimmed = next.length > EngagementSchema.RESOLVED_VECTORS_MAX
+            ? next.slice(next.length - EngagementSchema.RESOLVED_VECTORS_MAX)
+            : next
+          return [{ created }, { ...current, resolved_vectors: trimmed }]
+        })
         yield* logChange(
           "record_vector",
           "vector",
           vector.target,
-          `[${vector.status.toUpperCase()}] ${vector.target} :: ${vector.vector}${created ? "" : " (re-probe)"}`,
+          `[${vector.status.toUpperCase()}] ${vector.target} :: ${vector.vector}${result.created ? "" : " (re-probe)"}`,
         )
-        return { created }
+        yield* persistCurrent
+        return result
       }),
 
       getResolvedVectors: Effect.fn("EngagementStore.getResolvedVectors")(function* (filter) {
@@ -988,6 +1135,61 @@ const layer = Layer.effect(
         if (filter?.target) vectors = vectors.filter((v) => v.target === filter.target)
         if (filter?.status) vectors = vectors.filter((v) => v.status === filter.status)
         return vectors
+      }),
+
+      // --- Goal ---
+      setGoal: Effect.fn("EngagementStore.setGoal")(function* (text) {
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          const goal: EngagementSchema.Goal = {
+            text,
+            status: "active",
+            set_at: new Date().toISOString(),
+          }
+          return [true, { ...current, goal }]
+        })
+        if (modified) {
+          yield* logChange("set_goal", "goal", "goal", `Goal set: ${text}`)
+          yield* persistCurrent
+        }
+      }),
+
+      updateGoal: Effect.fn("EngagementStore.updateGoal")(function* (patch) {
+        const found = yield* Ref.modify(stateRef, (current) => {
+          if (!current?.goal) return [false, current]
+          const updated = { ...current.goal }
+          if (patch.status) (updated as Record<string, unknown>).status = patch.status
+          if (patch.evidence !== undefined) (updated as Record<string, unknown>).evidence = patch.evidence
+          if (patch.status === "achieved") (updated as Record<string, unknown>).achieved_at = new Date().toISOString()
+          return [true, { ...current, goal: updated as EngagementSchema.Goal }]
+        })
+        if (found) {
+          yield* logChange("update_goal", "goal", "goal", `Goal ${patch.status ?? "updated"}${patch.evidence ? `: ${patch.evidence.slice(0, 80)}` : ""}`)
+          yield* persistCurrent
+        }
+        return found
+      }),
+
+      clearGoal: Effect.fn("EngagementStore.clearGoal")(function* () {
+        const modified = yield* Ref.modify(stateRef, (current) => {
+          if (!current) return [false, current]
+          return [true, { ...current, goal: undefined }]
+        })
+        if (modified) {
+          yield* logChange("clear_goal", "goal", "goal", `Goal cleared`)
+          yield* persistCurrent
+        }
+      }),
+
+      readSelected: Effect.fn("EngagementStore.readSelected")(function* () {
+        const selectedPath = path.join(ENGAGEMENTS_DIR, SELECTED_FILE)
+        try {
+          const value = fs.readFileSync(selectedPath, "utf-8").trim()
+          fs.unlinkSync(selectedPath)
+          return value || undefined
+        } catch {
+          return undefined
+        }
       }),
     })
   }),

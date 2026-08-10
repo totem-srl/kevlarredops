@@ -183,6 +183,7 @@ export type Objective = typeof Objective.Type
 export const Scope = Schema.Struct({
   targets: Schema.Array(Schema.String),
   excludes: Schema.Array(Schema.String),
+  discovered_targets: Schema.optional(Schema.Array(Schema.String)),
   notes: Schema.optional(Schema.String),
 }).annotate({ identifier: "Engagement.Scope" })
 export type Scope = typeof Scope.Type
@@ -392,6 +393,18 @@ export type ResolvedVector = typeof ResolvedVector.Type
 
 export const RESOLVED_VECTORS_MAX = 300
 
+export const GoalStatus = Schema.Literals(["active", "achieved", "blocked", "abandoned"])
+export type GoalStatus = typeof GoalStatus.Type
+
+export const Goal = Schema.Struct({
+  text: Schema.String,
+  status: GoalStatus,
+  set_at: Schema.String,
+  achieved_at: Schema.optional(Schema.String),
+  evidence: Schema.optional(Schema.String),
+}).annotate({ identifier: "Engagement.Goal" })
+export type Goal = typeof Goal.Type
+
 export const State = Schema.Struct({
   id: ID,
   name: Schema.String,
@@ -413,6 +426,7 @@ export const State = Schema.Struct({
   resolved_vectors: Schema.optional(Schema.Array(ResolvedVector)),
   artifacts: Schema.optional(Schema.Array(Artifact)),
   pause_on_finding: Schema.optional(PauseBehavior),
+  goal: Schema.optional(Goal),
   current_phase: PentestPhase,
   mode: PentestMode,
   notes: Schema.Array(Schema.String),
@@ -797,10 +811,11 @@ export function toCompactContext(state: State, maxHosts = 20, opts?: CompactCont
 
   const s = summary(state)
   const data: Record<string, unknown> = {
-    scope: { targets: state.scope.targets, excludes: state.scope.excludes },
+    scope: { targets: state.scope.targets, excludes: state.scope.excludes, ...(state.scope.discovered_targets?.length ? { discovered: state.scope.discovered_targets } : {}) },
     summary: s,
     phase: state.current_phase,
     mode: state.mode,
+    ...(state.goal ? { goal: { text: state.goal.text, status: state.goal.status } } : {}),
     hosts: {} as Record<string, unknown>,
   }
 

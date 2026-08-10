@@ -32,9 +32,10 @@ export const Parameters = Schema.Struct({
     "resolved_vectors",
     "subagents",
     "artifacts",
+    "goal",
   ]).annotate({
     description:
-      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), resolved_vectors (settled attack vectors — check before opening a vector; filter by status attempted|confirmed|resolved|blocked or a target substring), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status), artifacts (reusable weapons/loot/scripts recorded this engagement — INVOKE a recorded exploit instead of re-deriving its payload)",
+      "Type of query: summary, hosts, vulns, creds, scope, phase, flags, tasks, host, full, engagements, objectives, domain, changelog, diff, relationships, decisions, alerts, sessions (live shells/tunnels), segments (network), ooda (full situation-awareness context), wordlists (used wordlists per target:port), resolved_vectors (settled attack vectors — check before opening a vector; filter by status attempted|confirmed|resolved|blocked or a target substring), subagents (REAL running/finished subagent processes for this session — the source of truth, unlike task_graph status), artifacts (reusable weapons/loot/scripts recorded this engagement — INVOKE a recorded exploit instead of re-deriving its payload), goal (current engagement goal)",
   }),
   filter: Schema.optional(Schema.String).annotate({
     description: "Filter: IP for host query, severity for vulns, engagement name for details",
@@ -550,6 +551,18 @@ export const StateQueryTool = Tool.define(
             case "full": {
               const compact = EngagementSchema.toCompactContext(state)
               return { title: "Full Context", metadata: {}, output: compact }
+            }
+
+            case "goal": {
+              if (!state.goal) {
+                return { title: "Goal", metadata: {}, output: "No goal set. Use /goal <text> or state_update set_goal to set one." }
+              }
+              const g = state.goal
+              return {
+                title: "Goal",
+                metadata: { status: g.status },
+                output: `Goal: "${g.text}"\nStatus: ${g.status}\nSet: ${g.set_at}${g.achieved_at ? `\nAchieved: ${g.achieved_at}` : ""}${g.evidence ? `\nEvidence: ${g.evidence}` : ""}`,
+              }
             }
 
             default: {

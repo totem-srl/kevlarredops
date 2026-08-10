@@ -1142,10 +1142,17 @@ const layer = Layer.effect(
         let step = 0
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
-        // Auto-load last engagement if none in memory
+        // Auto-load engagement: .selected file (from TUI dialog) > .last fallback
         yield* Effect.gen(function* () {
           const current = yield* engagement.get()
           if (current) return
+          const selected = yield* engagement.readSelected()
+          if (selected === "__none__") return
+          if (selected === "__new__") return
+          if (selected) {
+            yield* engagement.load(selected)
+            return
+          }
           const lastName = yield* engagement.lastEngagement()
           if (lastName) yield* engagement.load(lastName)
         }).pipe(Effect.ignore)
@@ -1654,6 +1661,10 @@ const layer = Layer.effect(
                     "</critic-protocol>",
                   ]
                   if (modeDirective) staticLines.push("", modeDirective)
+
+                  if (state.goal && state.goal.status === "active") {
+                    staticLines.push("", `GOAL: ${state.goal.text}`, "All actions must serve this goal. When the goal is achieved, call state_update update_goal with status='achieved' and evidence.")
+                  }
 
                   const pauseBehavior = state.pause_on_finding ?? "never"
                   if (pauseBehavior !== "never" && pauseDirectives[pauseBehavior]) {

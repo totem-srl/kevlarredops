@@ -51,6 +51,7 @@ import { DialogAgent } from "./component/dialog-agent"
 import { DialogSessionList } from "./component/dialog-session-list"
 import { DialogWorkspaceList } from "./component/dialog-workspace-list"
 import { DialogConsoleOrg } from "./component/dialog-console-org"
+import { DialogEngagementSelect, hasEngagements } from "./component/dialog-engagement"
 import { ThemeProvider, useTheme } from "./context/theme"
 import { Home } from "./routes/home"
 import { Session } from "./routes/session"
@@ -536,6 +537,15 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
         toast.show({ message: "Failed to fork session", variant: "error" })
       }
     })
+  })
+
+  let engagementDialogShown = false
+  createEffect(() => {
+    if (engagementDialogShown || sync.status !== "complete") return
+    if (sync.data.provider.length === 0) return
+    if (!hasEngagements()) return
+    engagementDialogShown = true
+    dialog.replace(() => <DialogEngagementSelect />)
   })
 
   createEffect(

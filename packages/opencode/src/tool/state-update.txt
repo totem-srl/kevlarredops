@@ -22,7 +22,8 @@ Actions and their required data fields:
 - add_access: { host_ip: string, access_type: string, username: string, level?: "none"|"user"|"root"|"system", credential_id?: string, details?: string } — deduplicates by (access_type, username): re-adding updates the existing entry
 - set_phase: { phase: "recon"|"enumeration"|"vuln_assess"|"exploitation"|"post_exploit"|"reporting" }
 - set_mode: { mode: "auto"|"free"|"guided" }
-- update_scope: { targets?: string[], excludes?: string[], notes?: string }
+- update_scope: { excludes?: string[], discovered_targets?: string[], notes?: string } — canonical targets are READ-ONLY after creation. Use discovered_targets for agent-found assets.
+- add_discovered_target: { target: string } — add a single discovered subdomain/IP to scope (dedup, validates against canonical patterns)
 - add_flag: { flag: string }
 - add_note: { note: string }
 - add_attack_step: { source: string, target: string, technique: string, result: string, success?: boolean, mitre_attack_id?: string }
@@ -34,7 +35,7 @@ Actions and their required data fields:
 - add_relationship: { source_type: "host"|"credential"|"vuln"|"service"|"domain"|"user"|"group", source_id: string, rel_type: "EXPLOITED_VIA"|"CREDENTIAL_FROM"|"REACHABLE_FROM"|"TRUSTS"|"MEMBER_OF"|"ADMIN_OF"|"PIVOT_TO"|"AUTHENTICATES_TO"|"LATERAL_MOVE"|"CONTROLS", target_type: (same as source_type), target_id: string, metadata?: string } — deduplicates by (source_id, rel_type, target_id)
 - delete_relationship: { source_id: string, rel_type: string, target_id: string }
 - add_decision: { decision: string, reasoning: string, alternatives?: string[], phase?: string, id?: string } — strategic decisions only (not tactical nmap flags). Auto-capped at 100.
-- update_decision_outcome: { id: string, outcome: "success"|"failure"|"partial"|"abandoned", notes?: string }
+- update_decision_outcome: { id: string, outcome: "pending"|"successful"|"failed"|"abandoned"|"superseded", notes?: string }
 - add_alert: { title: string, severity: "critical"|"high"|"medium"|"low"|"info", details?: string, source_agent?: string, host_ip?: string, ttl_minutes?: number, id?: string } — inter-agent urgent findings. TTL defaults 60min, max 50 active.
 - acknowledge_alert: { id: string }
 - add_live_session: { session_type: "shell"|"meterpreter"|"tunnel"|"listener"|"proxy", host_ip: string, port?: number, username?: string, pid?: number, details?: string, local_port?: number, remote_target?: string, id?: string }
@@ -44,6 +45,9 @@ Actions and their required data fields:
 - update_network_segment: { id: string, ...any fields from add_network_segment to patch }
 - remove_network_segment: { id: string }
 - record_wordlist: { host_ip: string, port: number, tool_type: "dir_fuzz"|"brute"|"vhost"|"subdomain"|"user_enum"|"param_fuzz"|"password_spray", wordlist_path: string, results_count?: number, agent_type?: string } — track which wordlist was used against which host:port:tool_type. Deduplicates by (host_ip, port, tool_type, wordlist_path) — re-recording same combo returns "duplicate". Max 1000 entries. Use AFTER every fuzzing/brute-force run.
+- set_goal: { text: string } — set the engagement goal. All subsequent actions should serve this goal.
+- update_goal: { status?: "active"|"achieved"|"blocked"|"abandoned", evidence?: string } — update goal status. When achieved, include evidence.
+- clear_goal: {} — remove the current goal.
 - set_pause: { pause: "never"|"always"|"checkpoint" } — set pause-on-finding behavior. "never" = continuous (default). "always" = stop after every finding for user direction. "checkpoint" = pause briefly to show cumulative summary, continue unless redirected.
 - record_vector: { target: string (host:port/URL/endpoint), vector: string (technique, e.g. "open-redirect on /redirect"), status: "attempted"|"confirmed"|"resolved"|"blocked", tested_by?: string, evidence?: string, revisit_when?: string, attempt?: { technique: string, outcome: "failed"|"partial"|"success", detail?: string } } — settle an attack vector so no agent (this one or a parallel one) re-tests it BLINDLY. resolved=dead end, confirmed=vulnerable, attempted=inconclusive (retry only with a new technique), blocked=needs a precondition (set revisit_when). Deduplicates by (target, vector) — a re-probe bumps the attempt count. Max 300. Record EVERY dead end.
   STATUS DISCIPLINE: use `resolved` ONLY when you are confident the vector is genuinely NOT exploitable. If you merely failed or couldn't reach it, use `attempted` (retry-safe) — over-marking `resolved` entrenches a false negative. A `resolved` verdict is CONDITIONAL on the info you had: new leverage (fresh creds/access, a new technique/exploit, a changed target) can legitimately re-open it — that is NOT blind re-testing. If a vector is only dead "for now, without creds", use `blocked` + revisit_when instead of `resolved`.

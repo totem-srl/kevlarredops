@@ -21,6 +21,7 @@ export const Parameters = Schema.Struct({
     "set_phase",
     "set_mode",
     "update_scope",
+    "add_discovered_target",
     "add_flag",
     "add_note",
     "add_attack_step",
@@ -48,6 +49,9 @@ export const Parameters = Schema.Struct({
     "record_wordlist",
     "set_pause",
     "record_vector",
+    "set_goal",
+    "update_goal",
+    "clear_goal",
   ]).annotate({
     description: "The mutation to perform on the engagement state.",
   }),
@@ -152,7 +156,7 @@ export const StateUpdateTool = Tool.define(
               }
               const host = yield* store.addHost(ip, hostData)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.HostDiscovered, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -179,7 +183,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Host ${ip} not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Deleted ${ip}`,
                 metadata: { ip },
@@ -213,7 +217,7 @@ export const StateUpdateTool = Tool.define(
               } as EngagementSchema.Vulnerability
               yield* store.addVuln(hostIp, vuln)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.VulnFound, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -250,7 +254,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Vuln "${vulnId}" not found on host ${hostIp}.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const changedFields = Object.keys(patch).join(", ")
               return {
                 title: `Vuln updated: ${vulnId}`,
@@ -272,7 +276,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Vuln "${vulnId}" not found on host ${hostIp}.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Vuln deleted: ${vulnId}`,
                 metadata: { host_ip: hostIp, vuln_id: vulnId },
@@ -302,7 +306,7 @@ export const StateUpdateTool = Tool.define(
               } as Omit<EngagementSchema.Credential, "id">
               yield* store.addCredential(id, cred)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.CredentialFound, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -329,7 +333,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Credential "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Cred deleted: ${id}`,
                 metadata: { id },
@@ -363,7 +367,7 @@ export const StateUpdateTool = Tool.define(
               } as EngagementSchema.Access
               yield* store.addAccess(hostIp, access)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.AccessGained, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -389,7 +393,7 @@ export const StateUpdateTool = Tool.define(
               const oldPhase = state.current_phase
               yield* store.setPhase(phase)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.PhaseTransitioned, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -413,7 +417,7 @@ export const StateUpdateTool = Tool.define(
               const oldMode = state.mode
               yield* store.setMode(mode)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Mode: ${mode}`,
                 metadata: { old_mode: oldMode, new_mode: mode },
@@ -424,13 +428,17 @@ export const StateUpdateTool = Tool.define(
             case "update_scope": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const warnings: string[] = []
               const scopeUpdate: Partial<{ -readonly [K in keyof EngagementSchema.Scope]: EngagementSchema.Scope[K] }> = {}
-              if (d.targets) scopeUpdate.targets = d.targets as string[]
+              if (d.targets) {
+                warnings.push("Cannot modify canonical scope targets. Use discovered_targets for agent-found assets, or add_discovered_target for individual entries.")
+              }
               if (d.excludes) scopeUpdate.excludes = d.excludes as string[]
+              if (d.discovered_targets) scopeUpdate.discovered_targets = d.discovered_targets as string[]
               if (d.notes !== undefined) scopeUpdate.notes = d.notes as string
               yield* store.updateScope(scopeUpdate)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const scope = updated?.scope ?? state.scope
               yield* events.publish(PentestEvent.ScopeUpdated, {
                 timestamp: Date.now(),
@@ -438,10 +446,31 @@ export const StateUpdateTool = Tool.define(
                 targets: scope.targets,
                 excludes: scope.excludes,
               })
+              const disc = scope.discovered_targets?.length ? `\nDiscovered: ${scope.discovered_targets.join(", ")}` : ""
+              const warn = warnings.length ? `\n⚠ ${warnings.join("\n⚠ ")}` : ""
               return {
                 title: "Scope updated",
                 metadata: {},
-                output: `Scope updated. Targets: ${scope.targets.join(", ") || "(none)"}. Excludes: ${scope.excludes.join(", ") || "(none)"}${scope.notes ? `. Notes: ${scope.notes}` : ""}`,
+                output: `Scope updated. Targets: ${scope.targets.join(", ") || "(none)"}. Excludes: ${scope.excludes.join(", ") || "(none)"}${disc}${scope.notes ? `. Notes: ${scope.notes}` : ""}${warn}`,
+              }
+            }
+
+            case "add_discovered_target": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const target = d.target as string
+              if (!target) {
+                return { title: "Error", metadata: {}, output: "Error: data.target is required for add_discovered_target." }
+              }
+              const existing = state.scope.discovered_targets ?? []
+              if (existing.includes(target)) {
+                return { title: "Already known", metadata: {}, output: `Target "${target}" already in discovered_targets.` }
+              }
+              yield* store.updateScope({ discovered_targets: [...existing, target] })
+              return {
+                title: `Discovered: ${target}`,
+                metadata: { target },
+                output: `Added "${target}" to discovered targets. Total discovered: ${existing.length + 1}.`,
               }
             }
 
@@ -542,7 +571,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.setDomain(domain)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Domain: ${domainName}`,
                 metadata: { domain: domainName },
@@ -562,7 +591,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.updateDomain(patch)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const changedFields = Object.keys(patch).join(", ")
               return {
                 title: `Domain updated`,
@@ -595,7 +624,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.addObjective(objective)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               yield* events.publish(PentestEvent.ObjectiveAdded, {
                 timestamp: Date.now(),
                 engagementID: state.id,
@@ -641,7 +670,7 @@ export const StateUpdateTool = Tool.define(
               if (d.notes !== undefined) patch.notes = d.notes
               yield* store.updateObjective(id, patch)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const changedFields = Object.keys(patch).join(", ")
               yield* events.publish(PentestEvent.ObjectiveUpdated, {
                 timestamp: Date.now(),
@@ -671,7 +700,7 @@ export const StateUpdateTool = Tool.define(
               const evidence = d.evidence as string | undefined
               yield* store.completeObjective(id, evidence)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const obj = objectives[id]!
               const completedCount = Object.values(updated?.objectives ?? {}).filter((o) => o.status === "completed").length
               const totalCount = Object.keys(updated?.objectives ?? {}).length
@@ -720,7 +749,7 @@ export const StateUpdateTool = Tool.define(
                 }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Rel: ${relType}`,
                 metadata: { source: sourceId, target: targetId, rel_type: relType },
@@ -746,7 +775,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Relationship not found: ${sourceId} --[${relType}]--> ${targetId}` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Rel deleted`,
                 metadata: { source: sourceId, target: targetId },
@@ -770,11 +799,10 @@ export const StateUpdateTool = Tool.define(
                 decision,
                 reasoning,
                 alternatives: d.alternatives as string[] | undefined,
-                outcome: undefined as EngagementSchema.DecisionOutcome | undefined,
-                outcome_notes: undefined as string | undefined,
+                outcome: (d.outcome as EngagementSchema.DecisionOutcome | undefined) ?? ("pending" as EngagementSchema.DecisionOutcome),
+                outcome_notes: d.outcome_notes as string | undefined,
               }
               yield* store.addDecision(entry)
-              yield* store.save(state)
               return {
                 title: `Decision: ${decision.slice(0, 50)}`,
                 metadata: { id: entry.id, phase: entry.phase },
@@ -788,13 +816,12 @@ export const StateUpdateTool = Tool.define(
               const id = d.id as string
               const outcome = d.outcome as string
               if (!id || !outcome) {
-                return { title: "Error", metadata: {}, output: "Error: data.id and data.outcome (success|failure|partial|abandoned) are required." }
+                return { title: "Error", metadata: {}, output: "Error: data.id and data.outcome (pending|successful|failed|abandoned|superseded) are required." }
               }
               const ok = yield* store.updateDecisionOutcome(id, outcome, d.notes as string | undefined)
               if (!ok) {
                 return { title: "Error", metadata: {}, output: `Decision "${id}" not found.` }
               }
-              yield* store.save(state)
               return {
                 title: `Decision outcome: ${id}`,
                 metadata: { id, outcome },
@@ -802,7 +829,52 @@ export const StateUpdateTool = Tool.define(
               }
             }
 
-            // --- Alert Queue ---
+            // --- Goal ---
+            case "set_goal": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              const text = d.text as string
+              if (!text) {
+                return { title: "Error", metadata: {}, output: "Error: data.text is required for set_goal." }
+              }
+              yield* store.setGoal(text)
+              return {
+                title: `Goal set`,
+                metadata: { goal: text },
+                output: `Goal set: "${text}". All actions should now serve this goal.`,
+              }
+            }
+
+            case "update_goal": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              if (!state.goal) {
+                return { title: "Error", metadata: {}, output: "No goal is set. Use set_goal first." }
+              }
+              const patch: { status?: EngagementSchema.GoalStatus; evidence?: string } = {}
+              if (d.status) patch.status = d.status as EngagementSchema.GoalStatus
+              if (d.evidence !== undefined) patch.evidence = d.evidence as string
+              yield* store.updateGoal(patch)
+              const updated = yield* store.get()
+              return {
+                title: `Goal ${patch.status ?? "updated"}`,
+                metadata: { status: patch.status },
+                output: `Goal "${state.goal.text}" → ${updated?.goal?.status ?? patch.status ?? state.goal.status}${patch.evidence ? `\nEvidence: ${patch.evidence}` : ""}`,
+              }
+            }
+
+            case "clear_goal": {
+              const state = yield* store.get()
+              if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
+              yield* store.clearGoal()
+              return {
+                title: "Goal cleared",
+                metadata: {},
+                output: "Goal cleared. No active goal.",
+              }
+            }
+
+            // --- Resolved Vectors ---
             case "record_vector": {
               const state = yield* store.get()
               if (!state) return { title: "Error", metadata: {}, output: NO_ENGAGEMENT }
@@ -846,7 +918,7 @@ export const StateUpdateTool = Tool.define(
               }
               const { created } = yield* store.addResolvedVector(rec)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               const attemptNote = attempt_log ? ` | logged attempt: ${attempt_log[0]!.technique} (${attempt_log[0]!.outcome})` : ""
               return {
                 title: `Vector: ${status}`,
@@ -877,7 +949,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.addAlert(alert)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Alert: ${title}`,
                 metadata: { id: alert.id, severity },
@@ -897,7 +969,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Alert "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Alert acked: ${id}`,
                 metadata: { id },
@@ -927,7 +999,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.addArtifact(artifact)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Artifact: ${name}`,
                 metadata: { id: artifact.id, type: artType, path },
@@ -972,7 +1044,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.addLiveSession(session)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Session: ${sessionType} on ${hostIp}`,
                 metadata: { id: session.id, type: sessionType, host: hostIp },
@@ -996,7 +1068,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Live session "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Session updated: ${id}`,
                 metadata: { id },
@@ -1016,7 +1088,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Live session "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Session removed: ${id}`,
                 metadata: { id },
@@ -1044,7 +1116,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.addNetworkSegment(segment)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Segment: ${cidr}`,
                 metadata: { id: segment.id, cidr },
@@ -1068,7 +1140,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Network segment "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Segment updated: ${id}`,
                 metadata: { id },
@@ -1088,7 +1160,7 @@ export const StateUpdateTool = Tool.define(
                 return { title: "Error", metadata: {}, output: `Network segment "${id}" not found.` }
               }
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Segment removed: ${id}`,
                 metadata: { id },
@@ -1117,7 +1189,7 @@ export const StateUpdateTool = Tool.define(
               }
               const added = yield* store.addWordlistUsage(usage)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: added ? `Wordlist: ${wordlistPath}` : "Wordlist (duplicate)",
                 metadata: { host_ip: hostIp, port, tool_type: toolType },
@@ -1136,7 +1208,7 @@ export const StateUpdateTool = Tool.define(
               }
               yield* store.setPauseBehavior(pause as EngagementSchema.PauseBehavior)
               const updated = yield* store.get()
-              if (updated) yield* store.save(updated)
+
               return {
                 title: `Pause: ${pause}`,
                 metadata: { pause },
@@ -1197,7 +1269,6 @@ export const StateUpdateTool = Tool.define(
               }
             }
             const updated = yield* store.get()
-            if (updated) yield* store.save(updated)
             return {
               title: `Batch: ${succeeded}/${ops.length} succeeded`,
               metadata: { succeeded, failed, total: ops.length },

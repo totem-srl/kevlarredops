@@ -19,6 +19,7 @@ import PROMPT_MODE from "./template/pentest-mode.txt"
 import PROMPT_REPORT from "./template/pentest-report.txt"
 import PROMPT_OBJECTIVES from "./template/pentest-objectives.txt"
 import PROMPT_PAUSE from "./template/pentest-pause.txt"
+import PROMPT_GOAL from "./template/pentest-goal.txt"
 import { LegacyEvent } from "@pentestcode/schema/legacy-event"
 
 type State = {
@@ -66,6 +67,7 @@ export const Default = {
   REPORT: "report",
   OBJECTIVES: "objectives",
   PAUSE: "pause",
+  GOAL: "goal",
 } as const
 
 export interface Interface {
@@ -176,6 +178,14 @@ const layer = Layer.effect(
         source: "command",
         template: PROMPT_PAUSE,
         hints: hints(PROMPT_PAUSE),
+      }
+
+      commands[Default.GOAL] = {
+        name: Default.GOAL,
+        description: "set or check engagement goal [text|clear|status]",
+        source: "command",
+        template: PROMPT_GOAL,
+        hints: hints(PROMPT_GOAL),
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
