@@ -44,6 +44,10 @@ It's methodical where people get lazy: it sprays every credential against every 
 ## Install
 
 ```bash
+
+npm install -g pentestcode-ai
+
+# via curl
 curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
 ```
 
