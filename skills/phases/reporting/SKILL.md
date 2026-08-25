@@ -75,3 +75,10 @@ Prioritized remediation list:
 Use the `report_gen` tool to generate:
 - Markdown report (default)
 - JSON export (machine-readable)
+
+## Pitfalls
+- Suspected findings never ship as Confirmed/Exploited. The critic filter exists to catch exactly this — do not argue around it.
+- Redact half of every secret, key, or password quoted in evidence.
+- Write Impact from the victim's perspective (what an attacker achieves), never as tool-output narration.
+- CVSS base scores ignore business context. Adjust severity when warranted and state why.
+- `report_gen` is a deterministic builder that reads EngagementStore directly — feed it good state during the engagement instead of restating findings from memory at report time.

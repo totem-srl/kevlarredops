@@ -1,5 +1,6 @@
 ---
 name: svc-docker-k8s
+tags: [enumeration, exploitation, post_exploit]
 description: Docker/Kubernetes attack techniques — exposed API abuse, container escape, RBAC/privileged-pod issues, secret theft. Use when a container/orchestration surface is found. Triggers - Docker 2375/2376, Kubernetes API 6443, kubelet 10250, etcd 2379, /version, privileged pod, service-account token, docker.sock.
 ---
 
@@ -88,3 +89,23 @@ EOF
 etcdctl --endpoints=http://<target>:2379 get / --prefix --keys-only
 etcdctl --endpoints=http://<target>:2379 get /registry/secrets --prefix
 ```
+
+## Prove Impact
+- Docker API RCE: host file read (`cat /etc/shadow`) verbatim from container logs.
+- Pod-create escape: file read from HOST filesystem via the hostPath mount.
+- SA token escalation: `kubectl auth can-i --list` output showing secrets-read or cluster-admin, plus one real secret VALUE decoded (base64) from etcd or API.
+- kubelet exec: command output from the /run API response.
+- Key listing alone = `suspected`, not confirmed.
+
+## Tooling
+- `state_update`: services, credentials (tokens w/ namespace+SA name), access level gained.
+- `attack_path_suggest` once ≥2 graph nodes exist (pod→node→cloud chains).
+- Runner/pod → cloud metadata: follow cloud playbook.
+
+## Pitfalls
+- 2375 refusing plain HTTP may mean TLS-only on 2376 — retest with https scheme before dead-ending.
+- Privileged escape via fdisk assumes host disk present in /dev — check devices first.
+- `kubectl auth can-i` inside a pod reflects THAT pod's SA binding — always note namespace + serviceaccount name.
+- Creating pods is destructive-adjacent: prefix names `pentest-verify-*`, delete after proof, log in state.
+- Unauthenticated etcd is lab-rare — production needs client certs; don't over-retry.
+- NEVER kill/scale/delete existing workloads — availability is out of bounds.

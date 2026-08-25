@@ -1,5 +1,6 @@
 ---
 name: svc-mail
+tags: [recon, enumeration, exploitation]
 description: Mail server attack techniques — SMTP open relay, VRFY/EXPN/RCPT user enumeration, header injection, IMAP/POP3 access. Use when a mail service is found. Triggers - SMTP 25/465/587, POP3 110, IMAP 143, Postfix/Exim/Sendmail/Dovecot banner, VRFY.
 ---
 
@@ -73,3 +74,25 @@ a4 FETCH 1 BODY[]
 - OWA (Outlook Web Access): `/owa/`, `/ecp/` — brute force, spray
 - Roundcube: check version for known CVEs
 - SquirrelMail: `/squirrelmail/` — old versions have RCE
+
+## Decide — Attack Order
+1. User enumeration (VRFY/RCPT) → target list for cred_spray / webmail spray
+2. Authenticated access → mailbox dump = fastest real proof
+3. Open relay test (usually Low/Medium — note, move on)
+4. Webmail surface → hand off to web skills (auth-bypass-idor, api-testing)
+
+## Prove Impact
+- Mailbox access: `RETR`/`FETCH` one REAL email, quote subject+sender (redact half). Folder listing ≠ impact.
+- Open relay: capture the remote `250 Queued` acceptance — config heuristic without delivery proof stays `suspected`.
+- Enumerated users feed `cred_spray` and OWA spraying — record them via `state_update`.
+
+## Tooling
+- `state_update`: user list, credentials, mailbox-content classification (never raw emails in state).
+- `cred_spray`: SMTP/IMAP/OWA reuse checks — lockout-aware.
+- `jwt_analyze` when webmail uses bearer tokens (modern OWA).
+
+## Pitfalls
+- VRFY disabled ≠ dead end: RCPT TO enumeration still works on default Postfix.
+- Response codes differ per server (252 vs 250 vs 550) — calibrate with one known-good + one known-bad address first.
+- Relay-test ONLY to a mailbox you control — never third parties.
+- Same creds usually valid POP3+IMAP+SMTP-submission; prefer IMAP for folder structure.

@@ -1,5 +1,6 @@
 ---
 name: svc-database
+tags: [vuln_assess, exploitation]
 description: Database service attack techniques — auth bypass, UDF/xp_cmdshell/COPY-TO-PROGRAM RCE, file read/write, cred dump. Use when a database service is found or you have DB creds. Triggers - MySQL 3306, PostgreSQL 5432, MSSQL 1433, Oracle 1521, Redis 6379, MongoDB 27017, db banner, default DB creds, NOAUTH.
 ---
 
@@ -96,3 +97,30 @@ curl http://<target>:9200/
 curl http://<target>:9200/_cat/indices?v
 curl http://<target>:9200/_search?pretty
 ```
+
+## Decide — which DB path first
+| Signal | Action |
+|---|---|
+| No auth (Redis/Mongo/ES) | Dump data immediately — fastest proven impact |
+| Default creds work | Check reuse via `cred_spray` before moving on |
+| Authenticated MySQL w/ FILE priv | LOAD_FILE secrets → web config → app creds |
+| MSSQL + sysadmin | xp_cmdshell = shell; else hash capture via xp_dirtree |
+| PostgreSQL superuser | COPY TO PROGRAM RCE |
+| Redis on web host | webshell write beats SSH-key write (no key perms needed) |
+
+## Exploit → PROVE IMPACT
+- Data access: one real record dump from a sensitive table (users/payments) — `SELECT` listing ≠ impact.
+- RCE: `id`/`whoami` output through UDF/COPY TO/xp_cmdshell recorded verbatim.
+- Redis write-to-RCE: executed payload output visible (`webshell` returns cmd result or SSH login succeeds).
+- Record DB type+version+creds in state via `state_update`; feed creds to `cred_spray` reuse check.
+
+## Tooling
+`nmap_parse` for service/version confirmation, `state_update` every finding, `report_gen` consumes confirmed vulns. Pair with `svc-web-server` (config files often leak DB creds).
+
+## False positives / pitfalls
+- **Redis CONFIG SET fails silently on newer versions** — `enabled-protection`/rename-command blocks it; verify dir actually changed.
+- **UDF needs plugin dir writable AND matching arch** — 64-bit .so on 32-bit server dies silently; check @@plugin_dir first.
+- **xp_cmdshell enabled ≠ working** — service account may lack network/logon rights; test `whoami` not just EXEC success.
+- **Mongo without auth but with localhost binding** — remote access blocked; confirm connection actually succeeded remotely.
+- **Never DROP/UPDATE production data** — read-only proof discipline; destructive SQL violates engagement rules.
+- **Cred reuse** — cracked/default DB password likely reuses elsewhere; always run `cred_spray` after first hit.

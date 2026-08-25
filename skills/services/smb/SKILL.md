@@ -1,5 +1,6 @@
 ---
 name: svc-smb
+tags: [enumeration, exploitation, post_exploit]
 description: SMB/CIFS attack techniques — null sessions, share enumeration, NTLM relay, EternalBlue, signing checks. Use when SMB is found. Triggers - ports 445/139, netbios, MS17-010 EternalBlue, signing:False, null session, share access, PetitPotam/coerce.
 ---
 
@@ -81,6 +82,18 @@ smbget -R smb://<target>/<share> -U <user>%<password>
 # Spider shares for interesting files
 crackmapexec smb <target> -u <user> -p <password> --spider <share> --pattern "passw|secret|cred|key|config"
 ```
+
+## Prove Impact
+- Admin access: `Pwn3d!` from netexec PLUS one executed command's output (whoami/hostname on target).
+- Share data: one sensitive FILE's content quoted (config with creds, HR sheet) — share listing ≠ impact.
+- NTDS/LSA/SAM dumps: hashes into `state_update`; crack follow-up per cracking skill.
+- EternalBlue: shell established — module check passing alone stays `suspected`.
+
+## Pitfalls
+- `--gen-relay-list` empty = signing enforced on SMB; pivot to relay skill LDAPS/ADCS targets instead.
+- MS17-010 scan false-positives behind load balancers — confirm via exploit attempt only with operator gate.
+- Guest session often maps to `nobody` with zero share rights — verify actual share READ before reporting.
+- Bare `--dpapi` rule above exists because subcommand flags silently drop the best loot.
 
 ## Output Rules
 - Always use quiet/filtered output flags. Only show successful results.

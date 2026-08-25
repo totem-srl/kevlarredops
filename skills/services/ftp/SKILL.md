@@ -1,5 +1,6 @@
 ---
 name: svc-ftp
+tags: [recon, enumeration, exploitation]
 description: FTP attack techniques — anonymous access, writable dirs, version CVEs, credential attacks. Use when FTP is open. Triggers - port 21, ftp banner, vsftpd 2.3.4, ProFTPD mod_copy, anonymous login, pure-ftpd.
 ---
 
@@ -52,3 +53,26 @@ hydra -L users.txt -p password ftp://<target>
 ftp> put shell.php
 curl http://<target>/shell.php?cmd=id
 ```
+
+## Decide — Attack Order
+1. Anonymous login → download everything readable
+2. Version CVE check (vsftpd backdoor, ProFTPD mod_copy) before any brute force
+3. Writable dir + co-hosted web server → webshell upload
+4. Targeted spray last (`hydra -t 4` max; FTP lockouts are fast)
+
+## Prove Impact
+- Shell via backdoor/webshell: `id`/`whoami` verbatim from the session — file write alone is not impact.
+- Data theft: one sensitive file downloaded, path + one redacted sample line into `state_update`.
+- mod_copy: fetch the copied file over HTTP and show its content lands outside FTP.
+
+## Tooling
+- `state_update`: services, credentials, files of interest.
+- `cred_spray` after any hit for password reuse (lockout-aware, never full wordlist).
+- `tunnel_manage` if FTP is only reachable through a pivot.
+- `nuclei_parse` if running nuclei ftp/exposure templates.
+
+## Pitfalls
+- vsftpd 2.3.4 backdoor needs BOTH the `:)` username AND port 6200 reachable — often firewalled off.
+- Writable ≠ exploitable: shell must land inside a web-served docroot with a live interpreter.
+- Anonymous upload dirs (/incoming) are commonly write-only — verify read-back before claiming anything.
+- Brute force trips fail2ban in seconds; cap threads, stop on first valid credential.

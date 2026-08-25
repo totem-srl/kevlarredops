@@ -72,6 +72,13 @@ whatweb <url> -v
 curl -sI <url>   # server headers, X-Powered-By
 ```
 
+## Pitfalls
+- crt.sh lags on recently issued certs; wildcard certs hide individual subdomains. CT results are a floor, not a ceiling.
+- amass defaults include active DNS brute-forcing. Keep `-passive` in RECON — active resolution belongs to ENUMERATION.
+- Shodan and web-archive data is weeks-to-months stale. Treat as leads; verify live before acting on them.
+- Dork hits point at cached pages — content may be gone. Record URL and date found.
+- This phase is passive-only: zero packets to target infrastructure. Any active probe means you have left RECON.
+
 ## Phase Completion Criteria
 Move to ENUMERATION when:
 - All target domains/IPs identified

@@ -1,5 +1,6 @@
 ---
 name: svc-web-server
+tags: [vuln_assess, exploitation]
 description: Web SERVER software (not app-layer) attack techniques — server misconfigs, known server CVEs, path traversal, exposed status/config. Use when you fingerprint the web server itself (for app-layer bugs use the web-<class> skills). Triggers - Server header, Apache 2.4.49/2.4.50, nginx alias traversal, IIS, Tomcat, /server-status, .htaccess.
 ---
 
@@ -112,3 +113,18 @@ Needing a session cookie/header is NOT a reason to hand-run curl — every tool 
 - For gobuster/ffuf: use `-q -n --no-error` or `-mc` match codes to suppress noise, then `gobuster_parse`.
 - Redirect large output to files. Never paste >50 lines of raw tool output.
 - Use `gobuster_parse` and `nuclei_parse` for auto-processing.
+
+## Prove Impact
+- Path traversal/RCE CVEs: retrieved `/etc/passwd` line or verbatim command output (`id`) — a 200 status code alone is NOT proof (some WAFs echo).
+- Exposed `.git`: reconstruct working tree, quote ONE real secret (key/token, redact half). Directory listing ≠ impact.
+- `.env` exposure: quote real DB URL/API key (redact half); confirm it's live config, not a fixture.
+- server-status: workers list revealing internal hostnames/vhosts counts as info disclosure (Low-Medium); score higher only if it leaks session IDs.
+- Backup files (.bak/.old): downloaded source containing credentials = confirmed; empty/generic file = suspected.
+
+## Pitfalls
+- CVE-2021-41773 needs `cgi-bin` + mod_cgi enabled for RCE — traversal-only install gives file read, don't claim RCE unproven.
+- Nginx alias traversal requires the exact missing-slash location config — test both `/path../` forms; 404 ≠ not vulnerable (try encoded).
+- IIS short-name (~1) disclosure is an oracle, not direct file read — enumerating names takes many requests; budget accordingly.
+- `.htaccess` readable usually means AllowOverride misconfig, NOT that secrets are inside — check for paired .htpasswd.
+- HTTP.sys CVE-2021-31166 affects only Win10 1903-2004 Server cores — verify build number, don't fire blind.
+- Backup-file fuzzing hits custom 404s that return 200 — diff response SIZE, rely on `-mc` + manual spot-check of outliers.

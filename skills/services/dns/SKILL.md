@@ -1,5 +1,6 @@
 ---
 name: svc-dns
+tags: [recon, enumeration, exploitation]
 description: DNS attack techniques — zone transfer, subdomain enumeration/takeover, cache poisoning. Use when DNS is found or you're mapping a domain. Triggers - port 53, named/bind, AXFR zone transfer, dangling CNAME, subdomain takeover, wildcard DNS.
 ---
 
@@ -58,3 +59,26 @@ dig @<target> <popular_domain> +norecurse
 # Unusually long subdomains or high query volume to single domain
 # Tools: iodine, dnscat2 for establishing DNS tunnels
 ```
+
+## Decide — Attack Order
+1. Zone transfer attempt first (instant win if misconfigured, cheap to test)
+2. Record harvest: MX/TXT/SRV expose mail hosts, cloud providers, internal hostnames
+3. Subdomain enum → resolved hosts feed gobuster/nuclei pipeline
+4. Takeover check on EVERY CNAME — highest-value DNS finding
+
+## Prove Impact
+- Subdomain takeover: serve content on the hijacked host and fetch it back — dangling CNAME alone is NOT impact.
+- AXFR dump is proof; count unique internal hostnames into `state_update`.
+- Internal-name leakage via SRV/TXT: list what became newly reachable vs prior scope knowledge.
+
+## Tooling
+- `state_update`: new Host records for discovered subdomains, takeover candidates as Vulnerability.
+- `nuclei_parse` on takeover template runs.
+- `gobuster_parse` after resolving+fuzzing web on live subdomains.
+- `scope_check` BEFORE testing any domain — records may point at out-of-scope shared hosting.
+
+## Pitfalls
+- Wildcard DNS resolves everything — brute-force hits are noise unless filtered against the wildcard IP.
+- Dangling CNAME ≠ takeover: provider must return its "no such app/bucket" page AND the resource must be claimable.
+- `dig @<target>` only answers authoritatively if target is NS for the zone; recursion tests are a separate question.
+- Cloud-hosted zones (Route53/Cloud DNS) rarely permit AXFR — don't burn cycles retrying variants.
