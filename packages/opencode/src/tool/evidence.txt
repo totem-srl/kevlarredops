@@ -1,0 +1,12 @@
+Manage the engagement evidence store.
+
+Every probe, scan, and verification step should leave evidence here. Content is stored
+content-addressed (sha256), deduplicated, and addressable by hash, prefix, or label.
+
+Actions:
+- add_text / add_file: store content with a label and source
+- list: recent entries with hashes and labels
+- search: filter entries by query (matches label, source, mime, hash, or text content)
+- get: fetch one entry's metadata plus a text preview
+
+Reference entries elsewhere (findings, observations) by sha256 or label.

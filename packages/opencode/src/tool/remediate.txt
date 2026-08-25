@@ -1,0 +1,11 @@
+Turn a recorded observation into actionable remediation.
+
+Two modes:
+- advice: generic, standard-referenced remediation steps (OWASP/CWE/NIST) for the finding.
+- patch: scaffold a minimal unified diff against the referenced file:line from the
+  observation's evidence or notes, inserting a clearly marked TODO the calling agent must
+  replace with a real fix. Never auto-applied.
+
+Patch mode refuses deliberately vulnerable training fixtures (juice-shop, webgoat, dvwa,
+bwapp) and falls back to advice. The produced payload is stored as evidence in the
+engagement.

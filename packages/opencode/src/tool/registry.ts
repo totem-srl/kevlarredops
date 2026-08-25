@@ -42,6 +42,27 @@ import { XssDetectTool } from "./xss-detect"
 import { JwtAnalyzeTool } from "./jwt-analyze"
 import { TunnelManageTool } from "./tunnel-manage"
 import { AttackPathSuggestTool } from "./attack-path-suggest"
+import { EvidenceTool } from "./evidence"
+import { ObservationTool } from "./observation"
+import { VaultTool } from "./vault"
+import { IdentityTool } from "./identity"
+import { OpsecTool } from "./opsec"
+import { MethodologyTool } from "./methodology"
+import { PlayTool } from "./play"
+import { NetTool } from "./net"
+import { CryptoTool } from "./crypto"
+import { HttpRequestTool } from "./http-request"
+import { CveTool } from "./cve"
+import { KnowledgeTool } from "./knowledge"
+import { FindingTool } from "./finding"
+import { RemediateTool } from "./remediate"
+import { RunbookTool } from "./runbook"
+import { AppsecProbeTool } from "./appsec-probe"
+import { BinaryTriageTool } from "./binary-triage"
+import { CloudPostureTool } from "./cloud-posture"
+import { ContainerSurfaceTool } from "./container-surface"
+import { IacTriageTool } from "./iac-triage"
+import { PwnBootstrapTool } from "./pwn-bootstrap"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import * as Truncate from "./truncate"
 import { Glob } from "@pentestcode/core/util/glob"
@@ -138,6 +159,27 @@ const layer = Layer.effect(
     const jwtanalyze = yield* JwtAnalyzeTool
     const tunnelmanage = yield* TunnelManageTool
     const attackpathsuggest = yield* AttackPathSuggestTool
+    const evidence = yield* EvidenceTool
+    const observation = yield* ObservationTool
+    const vault = yield* VaultTool
+    const identity = yield* IdentityTool
+    const opsec = yield* OpsecTool
+    const methodology = yield* MethodologyTool
+    const play = yield* PlayTool
+    const net = yield* NetTool
+    const crypto = yield* CryptoTool
+    const httprequest = yield* HttpRequestTool
+    const cve = yield* CveTool
+    const knowledge = yield* KnowledgeTool
+    const finding = yield* FindingTool
+    const remediate = yield* RemediateTool
+    const runbook = yield* RunbookTool
+    const appsecprobe = yield* AppsecProbeTool
+    const binarytriage = yield* BinaryTriageTool
+    const cloudposture = yield* CloudPostureTool
+    const containersurface = yield* ContainerSurfaceTool
+    const iactriage = yield* IacTriageTool
+    const pwnbootstrap = yield* PwnBootstrapTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -259,6 +301,27 @@ const layer = Layer.effect(
           jwtanalyze: Tool.init(jwtanalyze),
           tunnelmanage: Tool.init(tunnelmanage),
           attackpathsuggest: Tool.init(attackpathsuggest),
+          evidence: Tool.init(evidence),
+          observation: Tool.init(observation),
+          vault: Tool.init(vault),
+          identity: Tool.init(identity),
+          opsec: Tool.init(opsec),
+          methodology: Tool.init(methodology),
+          play: Tool.init(play),
+          net: Tool.init(net),
+          crypto: Tool.init(crypto),
+          httprequest: Tool.init(httprequest),
+          cve: Tool.init(cve),
+          knowledge: Tool.init(knowledge),
+          finding: Tool.init(finding),
+          remediate: Tool.init(remediate),
+          runbook: Tool.init(runbook),
+          appsecprobe: Tool.init(appsecprobe),
+          binarytriage: Tool.init(binarytriage),
+          cloudposture: Tool.init(cloudposture),
+          containersurface: Tool.init(containersurface),
+          iactriage: Tool.init(iactriage),
+          pwnbootstrap: Tool.init(pwnbootstrap),
         })
 
         return {
@@ -293,6 +356,27 @@ const layer = Layer.effect(
             tool.jwtanalyze,
             tool.tunnelmanage,
             tool.attackpathsuggest,
+            tool.evidence,
+            tool.observation,
+            tool.vault,
+            tool.identity,
+            tool.opsec,
+            tool.methodology,
+            tool.play,
+            tool.net,
+            tool.crypto,
+            tool.httprequest,
+            tool.cve,
+            tool.knowledge,
+            tool.finding,
+            tool.remediate,
+            tool.runbook,
+            tool.appsecprobe,
+            tool.binarytriage,
+            tool.cloudposture,
+            tool.containersurface,
+            tool.iactriage,
+            tool.pwnbootstrap,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,

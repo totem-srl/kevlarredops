@@ -1,0 +1,6 @@
+Query security testing methodologies bundled locally: MITRE ATT&CK, PTES, and OWASP Web Security Testing Guide.
+
+- No args: list available frameworks with phase counts.
+- framework only: list its phases.
+- framework + phase: show the phase's techniques.
+- query: substring search across all frameworks/phases/techniques.

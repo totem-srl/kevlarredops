@@ -1,0 +1,11 @@
+Bootstrap an engagement for a target in one step.
+
+Classifies the target shape (URL, IP/CIDR, or domain), creates a new engagement named after
+it, sets the target as the engagement scope, moves the phase to recon, and recommends the
+matching starting play:
+
+- URL → web-surface play
+- IP/CIDR → network-surface play
+- domain → osint-target play
+
+Use this at the start of a session instead of manually initializing scope and phase.

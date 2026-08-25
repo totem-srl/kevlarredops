@@ -1,0 +1,8 @@
+Raw network interaction for services that plain HTTP tools cannot reach.
+
+Operations:
+- banner_grab: connect to host:port and capture the service banner.
+- tcp_send: connect, send a payload (utf8/hex/base64), read the response.
+- udp_send: send a datagram and wait for one reply.
+
+Hosts are checked against engagement scope before connecting. Output is byte-formatted with printable text plus \xNN escapes.

@@ -1,0 +1,15 @@
+Run lightweight, evidence-first security probes against a single in-scope web target.
+
+First maps the observed surface (links + forms on the target page), then executes the
+requested checks and reports candidate findings with severity, confidence, and the exact
+request/response evidence:
+
+- sqli_search: injects a SQL error payload into a reflected form/route parameter
+- xss_search: reflects a marker script payload through a form or query parameter
+- broken_auth_jwt: submits dummy credentials to a login form and inspects the response for token signals
+- idor_basket: rewrites a numeric id/basket parameter or path segment to 1 and compares responses
+- weak_cors: sends an evil Origin header and checks Access-Control-Allow-* handling
+
+This is a candidate-finding generator, not a scanner replacement: every candidate needs
+manual verification before it becomes a reportable finding. All probes are recorded as
+evidence, and an observation is added for triage.

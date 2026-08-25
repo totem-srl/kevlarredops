@@ -1,0 +1,8 @@
+Scan Infrastructure-as-Code files (Terraform, CloudFormation, Kubernetes, Dockerfile...) for
+misconfigurations using the `checkov` adapter.
+
+Point it at a directory or a single file; get back passed/failed/skipped counts plus the
+failed checks with severity and affected resource. Full results are stored as engagement
+evidence.
+
+Requires the `checkov` CLI on PATH.

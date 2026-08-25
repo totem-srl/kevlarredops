@@ -1,0 +1,5 @@
+OPSEC posture for the active engagement. In strict mode, third-party intel hosts (crt.sh, virustotal, shodan, urlscan, alienvault OTX, web.archive.org) are blocked and unmatched scope decisions default to DENY instead of ASK.
+
+Actions:
+- status: show current opsec level and blocklist.
+- set: change level between normal and strict. Level persists per engagement.

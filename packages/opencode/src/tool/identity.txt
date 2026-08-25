@@ -1,0 +1,8 @@
+Identity material for authenticated testing. Store an identity once (bearer token, cookie jar, raw header lines), activate it, and outbound http-request calls merge its headers/cookies automatically.
+
+Actions:
+- add: store identity material under a name.
+- use: activate a stored identity.
+- clear: deactivate (requests become anonymous).
+- status: describe active identity mode without exposing the full value.
+- list: list stored identities.

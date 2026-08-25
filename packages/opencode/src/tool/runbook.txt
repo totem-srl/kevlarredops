@@ -1,0 +1,11 @@
+Inspect and execute the play runbook with environment readiness checks.
+
+Actions:
+- list: every play with readiness status (ready / degraded / unavailable) computed from the
+  local environment — required binaries present, browser runtime available.
+- status: readiness detail for one play, including required args and missing capabilities.
+- run: execute a play after permission; steps missing required capabilities are skipped and
+  reported. Output is the formatted execution contract the calling agent follows step by step.
+
+Use this instead of `play` when you want to see what is actually runnable on this machine
+first, or when picking which plays to recommend for the current engagement kind.

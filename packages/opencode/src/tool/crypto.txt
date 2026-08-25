@@ -1,0 +1,10 @@
+Local cryptographic and encoding utilities — no network, no secrets leave the process.
+
+Operations:
+- hash: sha256/sha1/md5/sha512 of input.
+- hmac: keyed hash (requires key).
+- encode / decode: base64, base64url, hex, url, rot13.
+- jwt_decode: split a JWT into header/payload/signature WITHOUT verifying.
+- xor: repeating-key XOR.
+
+Use for token inspection, payload crafting, hash comparison during testing.

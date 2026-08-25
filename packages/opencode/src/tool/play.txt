@@ -1,0 +1,7 @@
+Guided playbooks ("plays") for common security workflows: web-surface, network-surface, api-surface, auth-surface, appsec-triage, appsec-web-triage, osint-target, ctf-warmup, cloud-posture, container-surface, iac-triage, binary-triage.
+
+Actions:
+- list (default when no id): show available plays with args and requirements.
+- run: execute a play by id with args. The runner resolves required capabilities (binaries/runtimes) from the local environment; steps missing a required capability are skipped and reported.
+
+Run output is an execution contract: follow each step's tool/skill in order.

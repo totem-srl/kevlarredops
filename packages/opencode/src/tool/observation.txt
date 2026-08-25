@@ -1,0 +1,8 @@
+Records observations during an engagement: vulnerabilities, code smells, intel facts, flags, IOCs, control gaps, risks. Observations are append-only event-sourced records that feed remediation and reporting.
+
+Actions:
+- list: show all observations with severity counts.
+- add: record a new observation (subtype/title required).
+- update: patch title/severity/confidence/status/note/tags/subtype by id.
+- remove: delete an observation by id.
+- link_evidence: attach an evidence artifact sha256 to an observation.

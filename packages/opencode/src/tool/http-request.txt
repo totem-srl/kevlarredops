@@ -1,0 +1,13 @@
+Send a raw HTTP request to an in-scope target and capture the full response as evidence.
+
+Use this when you need precise control over method, headers, and body — e.g. replaying a
+captured request, testing header handling, or probing an endpoint that normal browsing tools
+mangle. The response (status, headers, body preview) is returned along with a ready-to-paste
+curl replay command.
+
+The request is recorded in the engagement evidence store automatically. When the engagement
+is scoped, requests outside scope are blocked before any network activity starts. In strict
+opsec mode, third-party intel hosts are denied.
+
+If an identity has been activated via the vault/identity tools, its headers and cookies are
+merged into the request unless you set the same header explicitly.

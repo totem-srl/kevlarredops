@@ -1,0 +1,10 @@
+Local secret vault for the current operator profile. Stores named secrets and manages an "active identity" whose headers/cookies are automatically merged into http-request calls.
+
+Actions:
+- set/delete: manage a named secret.
+- list: show stored keys.
+- get: read one secret value.
+- use_identity: activate a stored secret (or clear it) as the request identity.
+- status: describe active identity mode (headers/cookies/bearer/raw) without exposing full value.
+
+Values may be raw header lines ("Authorization: Bearer x", "Cookie: k=v"), a bare bearer token, or any string.

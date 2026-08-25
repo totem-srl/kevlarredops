@@ -1,0 +1,7 @@
+Query CVE vulnerability intelligence from the public NVD database and get structured,
+prioritized cards back: affected versions, CVSS severity, references, applicability against
+a known component, and safe next actions.
+
+Use this when a scan or observation surfaced a CVE id or a product/version pair and you need
+to decide whether it matters before planning exploitation or remediation. Results are cached
+as evidence in the active engagement when one is loaded.

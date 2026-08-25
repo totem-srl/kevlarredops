@@ -1,0 +1,8 @@
+Triage a local binary's exploit protections using the `checksec` adapter.
+
+Runs `checksec --output json` on the given path and summarizes which hardening features are
+present or missing (NX, PIE/ASLR, canary, RELRO, fortify, RPATH/RUNPATH...). Gaps become
+candidate findings recorded as evidence; each gap should be verified manually and promoted
+via the finding tool if it matters to the engagement.
+
+Requires the `checksec` binary on PATH.

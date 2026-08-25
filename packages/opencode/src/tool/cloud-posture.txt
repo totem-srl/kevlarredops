@@ -1,0 +1,7 @@
+Assess cloud posture for an AWS account using the `prowler` adapter.
+
+Runs prowler against the configured AWS credentials and summarizes failed checks by severity
+and service. Findings are recorded as evidence in the active engagement so they can feed the
+report and the finding lifecycle.
+
+Requires the `prowler` CLI on PATH and usable AWS credentials (env, profile, or instance role).

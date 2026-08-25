@@ -1,0 +1,8 @@
+Scan a container image for known vulnerabilities and embedded secrets using the `trivy`
+adapter.
+
+Runs `trivy image --format json` against the given image reference and summarizes
+vulnerability counts by severity (critical/high focus), plus any secrets found in image
+layers. Full results are stored as engagement evidence.
+
+Requires the `trivy` CLI on PATH.

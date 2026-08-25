@@ -1,0 +1,11 @@
+Manage the finding lifecycle: raw observations become candidates, candidates get verified
+against evidence and replay material, and only verified findings with evidence plus a replay
+(or a structured, justified replay exemption) are reportable.
+
+Actions:
+- list: bucketed summary of all findings (reportable / unverified / no evidence / no replay / rejected / stale)
+- status: detail for one finding id
+- promote: verify a candidate by attaching evidence refs and either replay material or an exemption
+- reject: mark a candidate rejected with a note
+
+Use this at report time: `list` tells you exactly which findings still block the report.

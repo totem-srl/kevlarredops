@@ -1,0 +1,8 @@
+Look up vulnerability intelligence and knowledge-broker capabilities.
+
+Two actions:
+- vuln_intel: fetch a full intel card for a CVE id from the public NVD database — summary,
+  CVSS severity, affected CPE ranges, applicability against an optional component/version,
+  references, and safe next actions. Prefer this over `cve` when you have a single known
+  CVE id and want the full formatted card.
+- capabilities: list the knowledge intents, actions, and modes this broker supports.
