@@ -24,7 +24,8 @@ const archMap = {
 
 const platform = platformMap[os.platform()] ?? os.platform()
 const arch = archMap[os.arch()] ?? os.arch()
-const base = `pentestcode-${platform}-${arch}`
+const scope = process.env.PACKAGE_SCOPE ?? ""
+const base = `${scope ? scope + "/" : ""}pentestcode-${platform}-${arch}`
 const sourceBinary = platform === "windows" ? "pentestcode.exe" : "pentestcode"
 const targetBinary = path.join(__dirname, "bin", "pentestcode.exe")
 

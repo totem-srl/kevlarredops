@@ -5,6 +5,10 @@ import { Script } from "@pentestcode/script"
 import { fileURLToPath } from "url"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
+
+// Set PACKAGE_SCOPE (e.g. "@myuser") to publish under a private npm scope;
+// pair with NPM_CONFIG_REGISTRY pointing at your private registry.
+const scope = process.env.PACKAGE_SCOPE ? `${process.env.PACKAGE_SCOPE}/` : ""
 process.chdir(dir)
 
 async function published(name: string, version: string) {
@@ -20,7 +24,7 @@ async function publish(dir: string, name: string, version: string) {
     return
   }
   await $`bun pm pack`.cwd(dir)
-  await $`npm publish *.tgz --access public --tag ${Script.channel}`.cwd(dir)
+  await $`npm publish *.tgz --access ${process.env.PACKAGE_SCOPE ? "restricted" : "public"} --tag ${Script.channel}`.cwd(dir)
 }
 
 const binaries: Record<string, string> = {}
@@ -54,7 +58,7 @@ await Bun.file(`./dist/${pkg.name}/bin/${pkg.name}.exe`).write(
 await Bun.file(`./dist/${pkg.name}/package.json`).write(
   JSON.stringify(
     {
-      name: pkg.name + "-ai",
+      name: scope + pkg.name + "-ai",
       bin: {
         [pkg.name]: `./bin/${pkg.name}.exe`,
       },
@@ -65,7 +69,7 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
       license: pkg.license,
       os: ["darwin", "linux", "win32"],
       cpu: ["arm64", "x64"],
-      optionalDependencies: binaries,
+      optionalDependencies: Object.fromEntries(Object.entries(binaries).map(([k, v]) => [scope + k, v])),
     },
     null,
     2,

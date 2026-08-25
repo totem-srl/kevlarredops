@@ -4,6 +4,37 @@ Tools and modules powering pentest / bug-bounty workflows. Everything here recor
 evidence into the engagement store and follows the finding lifecycle (see
 [METHODOLOGY](./METHODOLOGY.md)).
 
+## Install
+
+From an existing checkout:
+
+```sh
+./script/install.sh        # links ~/.local/bin/pentestcode (skips build if dist exists)
+```
+
+From a private git repo (no npm registry needed):
+
+```sh
+PENTESTCODE_REPO=git@github.com:you/pentestcode.git ./script/install.sh
+```
+
+Env: `PENTESTCODE_BRANCH` (default main), `PENTESTCODE_DIR` (source location),
+`PENTESTCODE_FORCE_BUILD=1` to rebuild.
+
+npm packaging is built in (`packages/opencode/script/publish.ts`). For a private
+registry (e.g. GitHub Packages):
+
+```sh
+cd packages/opencode && bun run script/build.ts
+PACKAGE_SCOPE=@youruser NPM_CONFIG_REGISTRY=https://npm.pkg.github.com \
+  bun run script/publish.ts     # publishes @youruser/pentestcode-ai + scoped platform pkgs
+```
+
+Then install anywhere with `npm i -g @youruser/pentestcode-ai`. The wrapper's
+postinstall copies the right platform binary; set `PACKAGE_SCOPE` at install time
+too so postinstall resolves the scoped platform packages.
+
+
 ## Core modules (`packages/core/src/cyber/`)
 
 | Module | Purpose |
