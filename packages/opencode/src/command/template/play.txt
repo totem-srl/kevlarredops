@@ -1,0 +1,7 @@
+Run a play from the methodology-driven playbook.
+
+If no arguments are provided, use the `play` tool with `action: "list"` to show available plays with their argument names, then ask which to run.
+
+If the user names a play, resolve the id (use `play` list if unsure), gather any required args from the user or context, and run it via the `runbook` tool with `action: "run"`, `id`, and `args_json`. The output is an execution contract — follow its steps in order, using real tools for each step and recording evidence as you go.
+
+$ARGUMENTS

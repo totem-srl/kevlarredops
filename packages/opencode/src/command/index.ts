@@ -20,6 +20,11 @@ import PROMPT_REPORT from "./template/pentest-report.txt"
 import PROMPT_OBJECTIVES from "./template/pentest-objectives.txt"
 import PROMPT_PAUSE from "./template/pentest-pause.txt"
 import PROMPT_GOAL from "./template/pentest-goal.txt"
+import PROMPT_OPSEC from "./template/opsec.txt"
+import PROMPT_PWN from "./template/pwn.txt"
+import PROMPT_PLAY from "./template/play.txt"
+import PROMPT_REMEDIATE from "./template/remediate.txt"
+import PROMPT_RUNBOOK from "./template/runbook.txt"
 import { LegacyEvent } from "@pentestcode/schema/legacy-event"
 
 type State = {
@@ -68,6 +73,11 @@ export const Default = {
   OBJECTIVES: "objectives",
   PAUSE: "pause",
   GOAL: "goal",
+  OPSEC: "opsec",
+  PWN: "pwn",
+  PLAY: "play",
+  REMEDIATE: "remediate",
+  RUNBOOK: "runbook",
 } as const
 
 export interface Interface {
@@ -186,6 +196,42 @@ const layer = Layer.effect(
         source: "command",
         template: PROMPT_GOAL,
         hints: hints(PROMPT_GOAL),
+      }
+
+      commands[Default.OPSEC] = {
+        name: Default.OPSEC,
+        description: "show or set opsec level [normal|strict]",
+        source: "command",
+        template: PROMPT_OPSEC,
+        hints: hints(PROMPT_OPSEC),
+      }
+      commands[Default.PWN] = {
+        name: Default.PWN,
+        description: "bootstrap an engagement for a target [url|ip|domain]",
+        source: "command",
+        template: PROMPT_PWN,
+        hints: hints(PROMPT_PWN),
+      }
+      commands[Default.PLAY] = {
+        name: Default.PLAY,
+        description: "run a methodology play [id] [args]",
+        source: "command",
+        template: PROMPT_PLAY,
+        hints: hints(PROMPT_PLAY),
+      }
+      commands[Default.REMEDIATE] = {
+        name: Default.REMEDIATE,
+        description: "remediate an observation [observation_id] [patch|advice]",
+        source: "command",
+        template: PROMPT_REMEDIATE,
+        hints: hints(PROMPT_REMEDIATE),
+      }
+      commands[Default.RUNBOOK] = {
+        name: Default.RUNBOOK,
+        description: "playbook readiness and runs [id|run id]",
+        source: "command",
+        template: PROMPT_RUNBOOK,
+        hints: hints(PROMPT_RUNBOOK),
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {

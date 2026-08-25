@@ -1,0 +1,11 @@
+Remediate a recorded observation.
+
+If no arguments are provided, use the `observation` tool with `action: "list"` to show observations, then ask which one to remediate.
+
+With an observation id, use the `remediate` tool:
+- mode "patch" scaffolds a minimal diff against the referenced file:line with a TODO marker — you MUST replace the marker with a real fix before applying anything.
+- mode "advice" returns standard-referenced remediation steps.
+
+Present the result, and if patch mode produced a scaffold, implement the actual fix in code now (respecting repo style), then verify it. Never apply a scaffold containing the TODO marker as-is.
+
+$ARGUMENTS

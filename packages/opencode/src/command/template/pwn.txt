@@ -1,0 +1,9 @@
+Bootstrap a new engagement for a target.
+
+If the user provides a target (URL, IP/CIDR, or domain), use the `pwn_bootstrap` tool with that target. It classifies the target shape, creates an engagement, sets scope, moves to recon, and recommends a starting play.
+
+After bootstrap, report: engagement name, classified kind, and the recommended play. Offer to run the recommended play via the `play` or `runbook` tool.
+
+If no arguments are provided, ask for a target.
+
+$ARGUMENTS

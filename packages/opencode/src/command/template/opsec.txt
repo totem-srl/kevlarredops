@@ -1,0 +1,7 @@
+Show or change the engagement opsec level.
+
+If no arguments are provided, use the `opsec` tool with `action: "status"` to show the current level and, in strict mode, which third-party intel hosts are blocked.
+
+If the user provides "strict" or "normal", use `opsec` with `action: "set"` and `level` set accordingly. Explain that strict mode denies unmatched requests (localhost excepted) and blocks third-party intel hosts such as crt.sh, VirusTotal, Shodan, urlscan.io, and the Wayback Machine.
+
+$ARGUMENTS

@@ -1,0 +1,9 @@
+Check playbook readiness or run a play with environment checks.
+
+If no arguments are provided, use the `runbook` tool with `action: "list"` to show every play's readiness (ready / degraded / unavailable) based on installed binaries and browser runtime.
+
+With a play id and no "run" keyword, use `action: "status"` for detailed readiness: required args, missing capabilities.
+
+With "run <id>" plus any args, use `action: "run"` with `args_json`. Follow the resulting execution contract step by step; skipped steps mean missing required capabilities — report them rather than improvising replacements without asking.
+
+$ARGUMENTS
