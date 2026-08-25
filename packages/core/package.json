@@ -20,6 +20,8 @@
     "./effect/app-node": "./src/effect/app-node.ts",
     "./session/runner": "./src/session/runner/index.ts",
     "./system-context": "./src/system-context/index.ts",
+    "./cyber/methodology": "./src/cyber/methodology/index.ts",
+    "./cyber/play": "./src/cyber/play/index.ts",
     "./*": "./src/*.ts"
   },
   "imports": {
