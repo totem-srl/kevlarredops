@@ -148,10 +148,10 @@ State survives the session: close the terminal, come back tomorrow, and the agen
 
 ## Skills
 
-72 curated knowledge packs, loaded on demand so they cost context only when relevant:
+73 curated knowledge packs, loaded on demand so they cost context only when relevant:
 
 - **Phase checklists** (6) — what to do in each pentest phase
-- **Service knowledge** (14) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD, Kerberos, ADCS, NTLM relay, cracking, pivoting
+- **Service knowledge** (15) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD, Kerberos, ADCS, NTLM relay, cracking, pivoting, OSINT
 - **Web vulnerability classes** (13) — SQLi, SSRF, SSTI, XXE, LFI/traversal, upload→RCE, deserialization, auth bypass/IDOR, API testing, command injection, XSS, race conditions, JS secrets
 - **Playbooks** (4) — infrastructure, Active Directory, web application, cloud (AWS/GCP/Azure)
 - **Reverse engineering & specialized** (38) — malware analysis, binary/JS/.NET/mobile reversing, Ghidra/IDA/radare2, pwn chains, firmware, OT/ICS, SDR, forensics, threat intel/hunting, LLM security, supply chain

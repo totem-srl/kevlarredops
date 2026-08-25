@@ -159,8 +159,8 @@ triggered. Four kinds:
 
 - **Phase checklists** (6): exit-criteria-driven phase guides.
 - **Playbooks** (4): cross-cutting campaign guides per environment class.
-- **Service skills** (14): protocol-specific deep dives (smb ssh ftp dns database
-  mail cicd docker-k8s web-server pivoting adcs kerberos cracking relay).
+- **Service skills** (15): protocol-specific deep dives (smb ssh ftp dns database
+  mail cicd docker-k8s web-server pivoting adcs kerberos cracking relay osint).
 - **Web vuln skills** (13): per-vuln detect→decide→exploit→prove loops
   (sqli ssti ssrf xxe lfi-traversal upload-rce deserialization
   auth-bypass-idor api-testing command-injection xss).
@@ -171,6 +171,11 @@ triggered. Four kinds:
 
 Every skill follows house format: frontmatter triggers → When this fires →
 Detect (tool-first) → Decide → Exploit → PROVE IMPACT → Tooling → Pitfalls.
+
+Frontmatter constraint: `name`, `description`, and `tags` must each sit on a
+single line (put trigger phrases inline in the description). A multiline
+description continuation fails the YAML parse and the skill is silently skipped
+at discovery — the only signal is a "failed to load skill" log line.
 
 ## Modes & human control
 
