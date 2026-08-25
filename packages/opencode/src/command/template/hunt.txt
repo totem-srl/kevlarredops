@@ -1,0 +1,16 @@
+Run a bug-bounty reputation sweep against a target.
+
+Use the `bounty_hunt` tool with the target. It fingerprints the web surface, checks for
+subdomain takeover indicators, exposed API specifications, missing security headers, secrets
+in JS bundles, and (with fuzz: true) interesting files — then ranks everything into a
+signal report stored as evidence.
+
+Workflow:
+1. Confirm the target is in scope for the program before running anything.
+2. Run `bounty_hunt` on the target. Start without fuzz; enable fuzz only when rate limits allow.
+3. Report the ranked signals. For every HIGH signal: reproduce manually, capture evidence
+   (evidence tool), and promote via the finding tool with replay material or a justified exemption.
+4. Feed discovered forms/routes into `appsec_probe` for payload-level verification.
+5. Never submit reports from automation alone — every submission needs manual verification.
+
+$ARGUMENTS

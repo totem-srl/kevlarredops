@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { rankBountySignals } from "@/tool/bounty-hunt"
+import { rankBountySignals, rankHeaderSignals, OPENAPI_PROBE_PATHS } from "@/tool/bounty-hunt"
 
 describe("rankBountySignals", () => {
   test("secrets rank high", () => {
@@ -52,5 +52,34 @@ describe("rankBountySignals", () => {
     expect(severities).toContain("info")
     expect(severities.every((s) => s !== "high")).toBe(true)
     expect(signals.filter((s) => s.severity === "medium").length).toBe(2)
+  })
+})
+
+describe("rankHeaderSignals", () => {
+  test("empty headers flag every security header", () => {
+    const signals = rankHeaderSignals({})
+    const low = signals.filter((s) => s.severity === "low")
+    expect(low.length).toBe(5)
+  })
+
+  test("present headers are not flagged; tech disclosure is info", () => {
+    const signals = rankHeaderSignals({
+      "Content-Security-Policy": "default-src 'self'",
+      "Strict-Transport-Security": "max-age=63072000",
+      "X-Frame-Options": "DENY",
+      "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
+      Server: "nginx/1.24.0",
+    })
+    expect(signals.filter((s) => s.severity === "low")).toHaveLength(0)
+    expect(signals.some((s) => s.severity === "info" && s.title.includes("technology"))).toBe(true)
+  })
+})
+
+describe("openapi probe paths", () => {
+  test("covers common spec locations", () => {
+    expect(OPENAPI_PROBE_PATHS.length).toBeGreaterThanOrEqual(8)
+    expect(OPENAPI_PROBE_PATHS).toContain("/openapi.json")
+    expect(OPENAPI_PROBE_PATHS).toContain("/swagger.json")
   })
 })

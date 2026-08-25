@@ -25,6 +25,7 @@ import PROMPT_PWN from "./template/pwn.txt"
 import PROMPT_PLAY from "./template/play.txt"
 import PROMPT_REMEDIATE from "./template/remediate.txt"
 import PROMPT_RUNBOOK from "./template/runbook.txt"
+import PROMPT_HUNT from "./template/hunt.txt"
 import { LegacyEvent } from "@pentestcode/schema/legacy-event"
 
 type State = {
@@ -78,6 +79,7 @@ export const Default = {
   PLAY: "play",
   REMEDIATE: "remediate",
   RUNBOOK: "runbook",
+  HUNT: "hunt",
 } as const
 
 export interface Interface {
@@ -232,6 +234,13 @@ const layer = Layer.effect(
         source: "command",
         template: PROMPT_RUNBOOK,
         hints: hints(PROMPT_RUNBOOK),
+      }
+      commands[Default.HUNT] = {
+        name: Default.HUNT,
+        description: "run a bug-bounty sweep [target]",
+        source: "command",
+        template: PROMPT_HUNT,
+        hints: hints(PROMPT_HUNT),
       }
 
       for (const [name, command] of Object.entries(cfg.command ?? {})) {
