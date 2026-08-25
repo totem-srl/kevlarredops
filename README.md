@@ -148,11 +148,15 @@ State survives the session: close the terminal, come back tomorrow, and the agen
 
 ## Skills
 
-19 curated knowledge packs, loaded on demand so they cost context only when relevant:
+72 curated knowledge packs, loaded on demand so they cost context only when relevant:
 
 - **Phase checklists** (6) — what to do in each pentest phase
-- **Service knowledge** (9) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD
-- **Playbooks** (4) — infrastructure, Active Directory, web application, cloud
+- **Service knowledge** (14) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD, Kerberos, ADCS, NTLM relay, cracking, pivoting
+- **Web vulnerability classes** (13) — SQLi, SSRF, SSTI, XXE, LFI/traversal, upload→RCE, deserialization, auth bypass/IDOR, API testing, command injection, XSS, race conditions, JS secrets
+- **Playbooks** (4) — infrastructure, Active Directory, web application, cloud (AWS/GCP/Azure)
+- **Reverse engineering & specialized** (38) — malware analysis, binary/JS/.NET/mobile reversing, Ghidra/IDA/radare2, pwn chains, firmware, OT/ICS, SDR, forensics, threat intel/hunting, LLM security, supply chain
+
+The full operating model — kill-chain lifecycle, evidence chain, state graph, multi-agent topology — is documented in [docs/METHODOLOGY.md](docs/METHODOLOGY.md).
 
 Skills are plain markdown. Add your own by dropping a `SKILL.md` into the skills directory — no code changes needed.
 
