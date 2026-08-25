@@ -1,0 +1,6 @@
+Triage an unknown binary or file locally: identify its type from magic bytes, extract
+printable strings worth eyeballing (URLs, paths, flags, interesting keywords), and compute
+overall plus per-region Shannon entropy to flag packing/encryption.
+
+Pure local analysis — no adapters required. Use it as the first step before deeper reverse
+tooling (checksec via binary_triage, disassemblers, etc.).

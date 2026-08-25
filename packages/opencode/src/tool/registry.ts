@@ -63,6 +63,7 @@ import { CloudPostureTool } from "./cloud-posture"
 import { ContainerSurfaceTool } from "./container-surface"
 import { IacTriageTool } from "./iac-triage"
 import { PwnBootstrapTool } from "./pwn-bootstrap"
+import { FileTriageTool } from "./file-triage"
 import { ReconPipelineTool } from "./recon-pipeline"
 import { BountyHuntTool } from "./bounty-hunt"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
@@ -182,6 +183,7 @@ const layer = Layer.effect(
     const containersurface = yield* ContainerSurfaceTool
     const iactriage = yield* IacTriageTool
     const pwnbootstrap = yield* PwnBootstrapTool
+    const filetriage = yield* FileTriageTool
     const reconpipeline = yield* ReconPipelineTool
     const bountyhunt = yield* BountyHuntTool
     const agent = yield* Agent.Service
@@ -326,6 +328,7 @@ const layer = Layer.effect(
           containersurface: Tool.init(containersurface),
           iactriage: Tool.init(iactriage),
           pwnbootstrap: Tool.init(pwnbootstrap),
+          filetriage: Tool.init(filetriage),
           reconpipeline: Tool.init(reconpipeline),
           bountyhunt: Tool.init(bountyhunt),
         })
@@ -383,6 +386,7 @@ const layer = Layer.effect(
             tool.containersurface,
             tool.iactriage,
             tool.pwnbootstrap,
+            tool.filetriage,
             tool.reconpipeline,
             tool.bountyhunt,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
