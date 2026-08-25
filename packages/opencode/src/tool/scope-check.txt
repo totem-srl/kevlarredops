@@ -1,1 +1,7 @@
-Check whether a target (IP, CIDR, domain, or URL) is within the engagement scope. Always verify scope before scanning or interacting with new targets. Returns in_scope, out_of_scope, or no_scope_defined.
+Check whether a target (IP, CIDR, domain, or URL) is within the engagement scope. ALWAYS call this before scanning, exploiting, or otherwise interacting with any target you have not already verified. Returns in_scope, out_of_scope, or no_scope_defined.
+
+Rules:
+- Every NEW host, subnet, or discovered asset gets its own check — a pivot crosses an authorization boundary silently.
+- out_of_scope means STOP for that target; do not probe "just to see".
+- Agent-discovered assets that look in-scope should also be added via state_update add_discovered_target so other agents see the authorization.
+- no_scope_defined: ask the operator to define scope before any active testing.

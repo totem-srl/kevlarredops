@@ -1,1 +1,10 @@
-Generate a structured report from the current engagement state. Produces a markdown report with executive summary, scope, findings, attack path, credentials, and recommendations. Can also output raw JSON.
+Generate the engagement report from current state via report_gen. The builder is deterministic — it reads EngagementStore directly; do not restate findings from memory that are not in state.
+
+When to call: at the reporting phase, when the operator requests a report (/report), or when an objective completes and its evidence should be captured.
+
+Parameters:
+- format: "markdown" (default, for delivery) or "json" (for downstream tooling).
+- sections: subset of executive_summary, scope, findings, attack_path, credentials, recommendations. Default: all.
+- output_path: write to file instead of returning inline.
+
+Evidence rule: only proven findings appear as confirmed/exploited in the report. If a finding is still suspected, do not force it into the report — prove it first or record it as a note. Findings without reproduction steps do not ship.
