@@ -1,0 +1,14 @@
+Plan and run a staged external-recon pipeline for one in-scope target.
+
+Actions:
+- plan: show which stages would run on this machine. Each stage is ready (adapter binary
+  installed) or missing_adapter (skipped). Built-in stages (DNS hint via system resolver,
+  takeover fingerprint check, default-credential hints) always work.
+- run: execute the pipeline. Passive discovery (subfinder/amass if present) runs first, then
+  HTTP probing of discovered hosts (httpx if present, built-in fetch otherwise), then an
+  nmap top-port scan when nmap is available. Every stage's output is captured as evidence;
+  discovered hosts are registered on the engagement; takeover candidates and interesting
+  facts become observations.
+
+Only use against targets you are authorized to test — the tool enforces engagement scope
+and asks for confirmation before running.
