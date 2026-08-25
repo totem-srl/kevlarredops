@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { rankBountySignals, rankHeaderSignals, rankContentSignals, OPENAPI_PROBE_PATHS } from "@/tool/bounty-hunt"
+import {
+  rankBountySignals,
+  rankHeaderSignals,
+  rankContentSignals,
+  buildSubmissionJson,
+  OPENAPI_PROBE_PATHS,
+} from "@/tool/bounty-hunt"
 
 describe("rankBountySignals", () => {
   test("secrets rank high", () => {
@@ -97,5 +103,21 @@ describe("rankContentSignals", () => {
 
   test("clean page yields no signals", () => {
     expect(rankContentSignals("<html><body>Welcome</body></html>")).toHaveLength(0)
+  })
+})
+
+describe("buildSubmissionJson", () => {
+  test("produces parseable report with signals and disclaimer", () => {
+    const json = buildSubmissionJson({
+      target: "https://x.example",
+      signals: [{ severity: "high", title: "takeover", detail: "dangling cname" }],
+      routes: 3,
+      forms: 1,
+      fuzzTested: 0,
+    })
+    const parsed = JSON.parse(json) as { target: string; signals: unknown[]; disclaimer: string }
+    expect(parsed.target).toBe("https://x.example")
+    expect(parsed.signals).toHaveLength(1)
+    expect(parsed.disclaimer).toContain("manual reproduction")
   })
 })

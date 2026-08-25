@@ -1,5 +1,7 @@
 import { Effect, Schema } from "effect"
 import dns from "node:dns/promises"
+import fs from "node:fs/promises"
+import path from "node:path"
 import { Evidence } from "@pentestcode/core/cyber/evidence"
 import { Observation } from "@pentestcode/core/cyber/observation"
 import { matchTakeover, type TakeoverFingerprint } from "@pentestcode/core/cyber/takeover"
@@ -15,7 +17,36 @@ export const Parameters = Schema.Struct({
   target: Schema.String.annotate({ description: "Absolute http(s) URL of the bounty target" }),
   fuzz: Schema.optional(Schema.Boolean.annotate({ description: "Also run built-in directory fuzz (default false)" })),
   timeout_ms: Schema.optional(Schema.Number.annotate({ description: "Per-request timeout in ms (default 10000, max 60000)" })),
+  export_json: Schema.optional(
+    Schema.String.annotate({ description: "Optional path to write a machine-readable submission-ready JSON report" }),
+  ),
 })
+
+export function buildSubmissionJson(input: {
+  target: string
+  signals: BountySignal[]
+  routes: number
+  forms: number
+  fuzzTested: number
+  openApi?: { url: string; version: string } | undefined
+  evidenceSha?: string | undefined
+}): string {
+  return JSON.stringify(
+    {
+      tool: "pentestcode bounty_hunt",
+      target: input.target,
+      generated_at: new Date().toISOString(),
+      surface: { links: input.routes, forms: input.forms, fuzz_probes: input.fuzzTested },
+      openapi: input.openApi ?? null,
+      evidence_sha256: input.evidenceSha ?? null,
+      signals: input.signals,
+      disclaimer:
+        "Automated candidate signals only. Every finding requires manual reproduction and evidence before submission.",
+    },
+    null,
+    2,
+  )
+}
 
 export type BountySignal = {
   severity: "high" | "medium" | "low" | "info"
@@ -388,6 +419,22 @@ export const BountyHuntTool = Tool.define(
             }
           }
 
+          let exportNote = ""
+          if (params.export_json) {
+            const abs = path.isAbsolute(params.export_json) ? params.export_json : path.join(process.cwd(), params.export_json)
+            const payload = buildSubmissionJson({
+              target: params.target,
+              signals,
+              routes: routes.length,
+              forms: forms.length,
+              fuzzTested,
+              openApi,
+              evidenceSha,
+            })
+            yield* Effect.promise(() => fs.writeFile(abs, payload, { mode: 0o600 }))
+            exportNote = `\nSubmission-ready JSON written to ${abs}`
+          }
+
           return {
             title: `bounty_hunt · ${signals.length} signal(s) · ${base.host}`,
             metadata: {
@@ -398,14 +445,16 @@ export const BountyHuntTool = Tool.define(
               forms: forms.length,
               fuzz_tested: fuzzTested,
               evidence_sha: evidenceSha,
+              export_path: params.export_json ?? undefined,
             },
-            output: renderReport(params.target, {
-              routes: routes.length,
-              forms: forms.length,
-              signals,
-              fuzzTested,
-              openApi,
-            }),
+            output:
+              renderReport(params.target, {
+                routes: routes.length,
+                forms: forms.length,
+                signals,
+                fuzzTested,
+                openApi,
+              }) + exportNote,
           }
         }).pipe(Effect.orDie),
     }
