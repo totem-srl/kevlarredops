@@ -148,7 +148,7 @@ State survives the session: close the terminal, come back tomorrow, and the agen
 
 ## Skills
 
-73 curated knowledge packs, loaded on demand so they cost context only when relevant:
+74 curated knowledge packs, loaded on demand so they cost context only when relevant:
 
 - **Phase checklists** (6) — what to do in each pentest phase
 - **Service knowledge** (15) — SMB, SSH, FTP, DNS, databases, web servers, mail, Docker/K8s, CI/CD, Kerberos, ADCS, NTLM relay, cracking, pivoting, OSINT

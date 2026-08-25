@@ -29,7 +29,8 @@ Fingerprint stack+version (whatweb/httpx, headers), CMS (wpscan/etc.), APIs (/sw
 | input renders in HTML/attr/JS context (reflected or stored) | **web-xss** |
 | input passed to server-side shell (ping/dig/export/convert) | **web-command-injection** |
 | known framework+version CVE | shared exploitation methodology + searchsploit/nuclei |
-Also-check (no dedicated skill yet): CSRF, CORS/security-headers, business-logic flaws. JS secrets/surface → **web-js-secrets**.
+| response varies with the Origin header (cross-origin data access) | **web-cors** |
+Also-check: CSRF, security-headers, business-logic flaws. JS secrets/surface → **web-js-secrets**.
 
 ## 4. PROVE + Report
 A finding is `suspected` until you reproduce concrete impact (dumped canary row / `id` / file bytes / cloud creds / cross-user data) — then `add_vuln` `confirmed` with the evidence. Never mark a host resolved/"safe" without a completed active scan. Report: reproduction steps + request/response evidence + CVSS + OWASP-WSTG mapping.

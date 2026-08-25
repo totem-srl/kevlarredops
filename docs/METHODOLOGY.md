@@ -161,7 +161,7 @@ triggered. Four kinds:
 - **Playbooks** (4): cross-cutting campaign guides per environment class.
 - **Service skills** (15): protocol-specific deep dives (smb ssh ftp dns database
   mail cicd docker-k8s web-server pivoting adcs kerberos cracking relay osint).
-- **Web vuln skills** (13): per-vuln detect→decide→exploit→prove loops
+- **Web vuln skills** (14): per-vuln detect→decide→exploit→prove loops
   (sqli ssti ssrf xxe lfi-traversal upload-rce deserialization
   auth-bypass-idor api-testing command-injection xss).
 - **Reverse & specialized skills** (35): malware analysis, binary/JS/.NET/mobile
