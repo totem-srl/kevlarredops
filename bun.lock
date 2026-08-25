@@ -325,7 +325,7 @@
     },
     "packages/opencode": {
       "name": "pentestcode",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "bin": {
         "pentestcode": "./bin/pentestcode",
       },
