@@ -36,3 +36,8 @@ tsconfig.tsbuildinfo
 
 # Internal docs (not for public repo)
 docs/architecture-rfc.md
+
+# Reference repos (local only, never publish)
+/numasec-reference/
+/reverse-skill-reference/
+/sniper-reference/
