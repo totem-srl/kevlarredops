@@ -97,11 +97,17 @@ async function fetchText(url: string, timeoutMs: number): Promise<string | undef
   }
 }
 
-export async function analyzeJs(input: { url: string; timeoutMs?: number; maxFiles?: number }): Promise<JsAnalysis> {
+export async function analyzeJs(input: {
+  url: string
+  timeoutMs?: number
+  maxFiles?: number
+  pace?: () => Promise<void>
+}): Promise<JsAnalysis> {
   const timeoutMs = input.timeoutMs ?? 10_000
   const maxFiles = input.maxFiles ?? 20
 
   const pageUrl = new URL(input.url)
+  await input.pace?.()
   const html = (await fetchText(pageUrl.toString(), timeoutMs)) ?? ""
   const combined: string[] = [html]
 
@@ -119,6 +125,7 @@ export async function analyzeJs(input: { url: string; timeoutMs?: number; maxFil
       continue
     }
     if (jsUrl.origin !== pageUrl.origin) continue
+    await input.pace?.()
     const text = await fetchText(jsUrl.toString(), timeoutMs)
     if (text === undefined) continue
     combined.push(text)

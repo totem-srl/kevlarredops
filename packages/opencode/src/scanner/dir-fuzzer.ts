@@ -1,3 +1,5 @@
+import { createPacer, type Pacer } from "./pacer"
+
 const INTERESTING_STATUS = new Set([200, 201, 204, 301, 302, 307, 308, 401, 403])
 
 export const BUILTIN_WORDLIST = [
@@ -50,20 +52,31 @@ export async function dirFuzz(input: {
   wordlist?: string[]
   timeoutMs?: number
   concurrency?: number
+  rps?: number
 }): Promise<{ hits: FuzzHit[]; tested: number }> {
   const base = new URL(input.baseUrl)
   if (!base.pathname.endsWith("/")) base.pathname = `${base.pathname}/`
   const timeoutMs = input.timeoutMs ?? 8_000
   const concurrency = input.concurrency ?? 10
+  const pace: Pacer = input.rps ? createPacer(input.rps) : async () => {}
 
   // baseline: a random path should 404; remember its status+length to filter soft-404s
   const baselinePath = `numasec_404_check_${Date.now()}`
   let baselineStatus = 404
   let baselineLength = -1
-  const baseline = await probe(base, baselinePath, timeoutMs)
-  if (baseline && !INTERESTING_STATUS.has(baseline.status)) {
-    baselineStatus = baseline.status
-    baselineLength = baseline.length
+  if (input.rps) {
+    await pace()
+    const baseline = await probe(base, baselinePath, timeoutMs)
+    if (baseline && !INTERESTING_STATUS.has(baseline.status)) {
+      baselineStatus = baseline.status
+      baselineLength = baseline.length
+    }
+  } else {
+    const baseline = await probe(base, baselinePath, timeoutMs)
+    if (baseline && !INTERESTING_STATUS.has(baseline.status)) {
+      baselineStatus = baseline.status
+      baselineLength = baseline.length
+    }
   }
 
   const candidates: string[] = []
@@ -76,6 +89,27 @@ export async function dirFuzz(input: {
 
   const hits: FuzzHit[] = []
   const seen = new Set<string>()
+
+  if (input.rps) {
+    for (const candidate of candidates) {
+      await pace()
+      const result = await probe(base, candidate, timeoutMs)
+      if (!result) continue
+      if (!INTERESTING_STATUS.has(result.status)) continue
+      if (result.status === baselineStatus && Math.abs(result.length - baselineLength) <= 50) continue
+      const key = `${candidate}:${result.status}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      hits.push({
+        path: candidate,
+        url: new URL(candidate, base).toString(),
+        status: result.status,
+        length: result.length,
+      })
+    }
+    return { hits, tested: candidates.length + 1 }
+  }
+
   for (let i = 0; i < candidates.length; i += concurrency) {
     const batch = candidates.slice(i, i + concurrency)
     const results = await Promise.all(

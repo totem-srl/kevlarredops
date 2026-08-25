@@ -6,6 +6,7 @@ import {
   buildSubmissionJson,
   OPENAPI_PROBE_PATHS,
 } from "@/tool/bounty-hunt"
+import { createPacer } from "@/scanner/pacer"
 
 describe("rankBountySignals", () => {
   test("secrets rank high", () => {
@@ -119,5 +120,24 @@ describe("buildSubmissionJson", () => {
     expect(parsed.target).toBe("https://x.example")
     expect(parsed.signals).toHaveLength(1)
     expect(parsed.disclaimer).toContain("manual reproduction")
+  })
+})
+
+describe("createPacer", () => {
+  test("enforces minimum spacing between calls at 5 rps", async () => {
+    const pace = createPacer(5)
+    const start = Date.now()
+    await pace()
+    await pace()
+    await pace()
+    const elapsed = Date.now() - start
+    expect(elapsed).toBeGreaterThanOrEqual(350)
+  })
+
+  test("does not wait when idle", async () => {
+    const pace = createPacer(5)
+    const start = Date.now()
+    await pace()
+    expect(Date.now() - start).toBeLessThan(100)
   })
 })

@@ -10,6 +10,7 @@ import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { extractForms, extractLinks } from "@/scanner/crawl"
 import { analyzeJs } from "@/scanner/js-analyzer"
 import { dirFuzz, type FuzzHit } from "@/scanner/dir-fuzzer"
+import { createPacer } from "@/scanner/pacer"
 import DESCRIPTION from "./bounty-hunt.txt"
 import * as Tool from "./tool"
 
@@ -19,6 +20,12 @@ export const Parameters = Schema.Struct({
   timeout_ms: Schema.optional(Schema.Number.annotate({ description: "Per-request timeout in ms (default 10000, max 60000)" })),
   export_json: Schema.optional(
     Schema.String.annotate({ description: "Optional path to write a machine-readable submission-ready JSON report" }),
+  ),
+  max_rps: Schema.optional(
+    Schema.Number.annotate({
+      description:
+        "Max requests per second across all probes (default 5). Keep within program limits — e.g. Intigriti allows max 5 req/s.",
+    }),
   ),
 })
 
@@ -96,9 +103,11 @@ export const OPENAPI_PROBE_PATHS = [
 export async function discoverOpenApi(
   base: URL,
   timeoutMs: number,
+  pace?: () => Promise<void>,
 ): Promise<{ url: string; version: string } | undefined> {
   for (const path of OPENAPI_PROBE_PATHS) {
     try {
+      await pace?.()
       const response = await fetch(new URL(path, base).toString(), {
         headers: { "user-agent": "pentestcode-bounty/1.0", accept: "application/json" },
         signal: AbortSignal.timeout(timeoutMs),
@@ -310,23 +319,26 @@ export const BountyHuntTool = Tool.define(
           })
 
           const timeoutMs = Math.min(Math.max(Math.trunc(params.timeout_ms ?? 10_000), 1_000), 60_000)
+          const maxRps = Math.min(Math.max(Math.trunc(params.max_rps ?? 5), 1), 20)
+          const pace = createPacer(maxRps)
 
-          const page = yield* Effect.promise(() =>
-            fetch(base.toString(), {
+          const page = yield* Effect.promise(async () => {
+            await pace()
+            return fetch(base.toString(), {
               headers: { "user-agent": "pentestcode-bounty/1.0" },
               redirect: "follow",
               signal: AbortSignal.timeout(timeoutMs),
-            }),
-          )
+            })
+          })
           const html = yield* Effect.promise(() => page.text())
 
           const routes = extractLinks(html, base)
           const forms = extractForms(html)
-          const js = yield* Effect.promise(() => analyzeJs({ url: base.toString(), timeoutMs }))
+          const js = yield* Effect.promise(() => analyzeJs({ url: base.toString(), timeoutMs, pace }))
           const fuzzHits: FuzzHit[] = []
           let fuzzTested = 0
           if (params.fuzz === true) {
-            const fuzzResult = yield* Effect.promise(() => dirFuzz({ baseUrl: base.toString(), timeoutMs }))
+            const fuzzResult = yield* Effect.promise(() => dirFuzz({ baseUrl: base.toString(), timeoutMs, rps: maxRps }))
             fuzzHits.push(...fuzzResult.hits)
             fuzzTested = fuzzResult.tested
           }
@@ -340,7 +352,7 @@ export const BountyHuntTool = Tool.define(
           })
           const headerSignals = rankHeaderSignals(responseHeaders)
 
-          const openApi = yield* Effect.promise(() => discoverOpenApi(base, Math.min(timeoutMs, 8000)))
+          const openApi = yield* Effect.promise(() => discoverOpenApi(base, Math.min(timeoutMs, 8000), pace))
 
           const signals = [
             ...rankBountySignals({
