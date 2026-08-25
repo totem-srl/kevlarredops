@@ -9,6 +9,10 @@ export const OAUTH_DUMMY_KEY = "pentestcode-oauth-dummy-key"
 
 const file = path.join(Global.Path.data, "auth.json")
 
+// The fork shares credentials with a sibling opencode install so users who are
+// already authenticated there (zen, go, ...) work here without re-logging in.
+const sharedFile = path.join(path.dirname(Global.Path.data), "opencode", "auth.json")
+
 const fail = (message: string) => (cause: unknown) => new AuthError({ message, cause })
 
 export class Oauth extends Schema.Class<Oauth>("OAuth")({
@@ -62,8 +66,11 @@ const layer = Layer.effect(
         } catch (err) {}
       }
 
-      const data = (yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
-      return Record.filterMap(data, (value) => Result.fromOption(decode(value), () => undefined))
+      const local = (yield* fsys.readJson(file).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
+      const shared = (yield* fsys.readJson(sharedFile).pipe(Effect.orElseSucceed(() => ({})))) as Record<string, unknown>
+      const decodeAll = (data: Record<string, unknown>) =>
+        Record.filterMap(data, (value) => Result.fromOption(decode(value), () => undefined))
+      return { ...decodeAll(shared), ...decodeAll(local) }
     })
 
     const get = Effect.fn("Auth.get")(function* (providerID: string) {
