@@ -1,0 +1,14 @@
+Run an automated bug-bounty sweep against one in-scope web target.
+
+Chains the platform's passive/light-active capabilities into a single hunt and records
+everything as evidence and triaged observations:
+
+1. Surface map — links and forms from the target page
+2. JavaScript analysis — embedded API keys, tokens, internal endpoints, SPA routes
+3. Subdomain takeover fingerprint — CNAME + response-body markers
+4. Optional directory fuzz (fuzz=true) — built-in wordlist with soft-404 filtering
+
+Results are ranked by bounty signal strength. Every candidate is UNVERIFIED until you
+reproduce it: promote confirmed ones via the finding tool, then go deeper with appsec_probe.
+
+Scope is enforced from the active engagement before any request is sent.

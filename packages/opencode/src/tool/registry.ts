@@ -64,6 +64,7 @@ import { ContainerSurfaceTool } from "./container-surface"
 import { IacTriageTool } from "./iac-triage"
 import { PwnBootstrapTool } from "./pwn-bootstrap"
 import { ReconPipelineTool } from "./recon-pipeline"
+import { BountyHuntTool } from "./bounty-hunt"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import * as Truncate from "./truncate"
 import { Glob } from "@pentestcode/core/util/glob"
@@ -182,6 +183,7 @@ const layer = Layer.effect(
     const iactriage = yield* IacTriageTool
     const pwnbootstrap = yield* PwnBootstrapTool
     const reconpipeline = yield* ReconPipelineTool
+    const bountyhunt = yield* BountyHuntTool
     const agent = yield* Agent.Service
 
     const state = yield* InstanceState.make<State>(
@@ -325,6 +327,7 @@ const layer = Layer.effect(
           iactriage: Tool.init(iactriage),
           pwnbootstrap: Tool.init(pwnbootstrap),
           reconpipeline: Tool.init(reconpipeline),
+          bountyhunt: Tool.init(bountyhunt),
         })
 
         return {
@@ -381,6 +384,7 @@ const layer = Layer.effect(
             tool.iactriage,
             tool.pwnbootstrap,
             tool.reconpipeline,
+            tool.bountyhunt,
             ...(flags.experimentalPlanMode && flags.client === "cli" ? [tool.plan] : []),
           ],
           task: tool.task,
