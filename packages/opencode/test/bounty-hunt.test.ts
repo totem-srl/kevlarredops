@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { rankBountySignals, rankHeaderSignals, OPENAPI_PROBE_PATHS } from "@/tool/bounty-hunt"
+import { rankBountySignals, rankHeaderSignals, rankContentSignals, OPENAPI_PROBE_PATHS } from "@/tool/bounty-hunt"
 
 describe("rankBountySignals", () => {
   test("secrets rank high", () => {
@@ -81,5 +81,21 @@ describe("openapi probe paths", () => {
     expect(OPENAPI_PROBE_PATHS.length).toBeGreaterThanOrEqual(8)
     expect(OPENAPI_PROBE_PATHS).toContain("/openapi.json")
     expect(OPENAPI_PROBE_PATHS).toContain("/swagger.json")
+  })
+})
+
+describe("rankContentSignals", () => {
+  test("flags sql error, lfi artifact and debug trace; dedupes per class", () => {
+    const body = "error: SQL syntax near ... /etc/passwd ... Traceback (most recent call last) ... another /etc/passwd"
+    const signals = rankContentSignals(body)
+    const classes = signals.map((s) => s.detail.split(":")[0])
+    expect(classes).toContain("sql-error")
+    expect(classes).toContain("lfi-indicator")
+    expect(classes).toContain("debug-artifact")
+    expect(classes.filter((c) => c === "lfi-indicator").length).toBe(1)
+  })
+
+  test("clean page yields no signals", () => {
+    expect(rankContentSignals("<html><body>Welcome</body></html>")).toHaveLength(0)
   })
 })

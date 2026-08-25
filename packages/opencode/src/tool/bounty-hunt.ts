@@ -144,6 +144,73 @@ export function rankBountySignals(input: {
   return signals
 }
 
+export const BUG_CLASS_PATTERNS: {
+  bugClass: string
+  pattern: RegExp
+  severity: BountySignal["severity"]
+  title: string
+}[] = [
+  {
+    bugClass: "sql-error",
+    pattern: /SQL syntax|SQLite3?::query|ORA-\d{5}|MySQLSyntaxErrorException|postgresql.*ERROR/i,
+    severity: "medium",
+    title: "Database error text in response",
+  },
+  {
+    bugClass: "lfi-indicator",
+    pattern: /\/etc\/passwd|\/proc\/self\/environ|c:\\\\windows\\\\win\.ini/i,
+    severity: "medium",
+    title: "File-path artifact suggesting LFI exposure",
+  },
+  {
+    bugClass: "debug-artifact",
+    pattern: /Traceback \(most recent call last\)|Stack trace:|DEBUG\s*=\s*True|Whoops, looks like something went wrong|laravel log/i,
+    severity: "low",
+    title: "Debug/stack-trace artifact exposed",
+  },
+  {
+    bugClass: "phpinfo",
+    pattern: /phpinfo\(\)/i,
+    severity: "medium",
+    title: "phpinfo() output reachable",
+  },
+  {
+    bugClass: "open-redirect",
+    pattern: /[?&](redirect|redir|url|next|return|returnTo)=https?:\/\//i,
+    severity: "low",
+    title: "URL parameter takes absolute redirect target",
+  },
+  {
+    bugClass: "ssrf-hint",
+    pattern: /[?&](feed|callback|webhook|fetch|proxy)=https?:\/\//i,
+    severity: "low",
+    title: "Parameter may fetch attacker-controlled URLs (SSRF hint)",
+  },
+  {
+    bugClass: "idor-hint",
+    pattern: /[?&](id|uid|user_id|account_id|order_id)=\d+/i,
+    severity: "info",
+    title: "Sequential numeric object identifier in URL",
+  },
+]
+
+export function rankContentSignals(body: string): BountySignal[] {
+  const seen = new Set<string>()
+  const signals: BountySignal[] = []
+  for (const entry of BUG_CLASS_PATTERNS) {
+    if (seen.has(entry.bugClass)) continue
+    if (!entry.pattern.test(body)) continue
+    seen.add(entry.bugClass)
+    const match = body.match(entry.pattern)?.[0] ?? ""
+    signals.push({
+      severity: entry.severity,
+      title: entry.title,
+      detail: `${entry.bugClass}: matched ${JSON.stringify(match.slice(0, 60))} — verify manually before reporting`,
+    })
+  }
+  return signals
+}
+
 function renderReport(target: string, input: {
   routes: number
   forms: number
@@ -254,6 +321,7 @@ export const BountyHuntTool = Tool.define(
               fuzzHits,
             }),
             ...headerSignals,
+            ...rankContentSignals(html),
             ...(openApi
               ? ([
                   {
