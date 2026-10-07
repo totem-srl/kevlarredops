@@ -140,6 +140,7 @@ const DOMAIN_RE = /\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b/gi
 const IPV6_CMD_RE = /(?:^|[\s=])([0-9a-fA-F:]{2,39}(?:\/\d{1,3})?)\b/g
 const USER_AT_HOST_RE = /(?:^|[\s=])(?:[a-zA-Z0-9._-]+)@([a-zA-Z0-9._-]+(?:\.[a-zA-Z]{2,})?)/g
 const UNC_PATH_RE = /(?:^|[\s=])(?:\\\\|\/\/)([a-zA-Z0-9._-]+)/g
+const KNOWN_TOOLS_RE = /\b(?:nmap|netexec|crackmapexec|ssh|scp|sftp|curl|wget|smbclient|rpcclient|evil-winrm|psexec|wmiexec|impacket|nuclei|gobuster|feroxbuster|ffuf|sqlmap|hydra|medusa|nikto|dirb|dirsearch)\b/i
 
 const IGNORE_IPS = new Set(["127.0.0.1", "0.0.0.0", "255.255.255.255"])
 const IGNORE_DOMAINS = new Set([
@@ -152,18 +153,19 @@ const IGNORE_DOMAINS = new Set([
 // socket.socket, sys.stdin, foo.decode) as "hosts" and floods every python-in-bash
 // command with false out-of-scope warnings. A curated common-TLD set kills those
 // tokens (their trailing label — load/recv/socket/decode — is never a TLD) while
-// keeping genuine external targets. Exotic-TLD targets simply go un-warned; that is
-// acceptable for an advisory check and far better than warning on every method call.
+// recognizing common external targets. This heuristic is incomplete: uncommon
+// TLDs, ignored hosts, and dynamically constructed destinations can escape it.
+// Callers must not treat command extraction as a network isolation boundary.
 const PUBLIC_TLDS = new Set([
   "com", "net", "org", "io", "co", "gov", "edu", "mil", "int", "biz", "info", "name", "pro",
   "app", "dev", "cloud", "tech", "xyz", "online", "site", "web", "me", "tv", "sh", "ai", "so",
+  "zip", "mov", "security", "company", "network", "agency",
   "uk", "us", "de", "fr", "ru", "cn", "jp", "in", "ca", "au", "br", "it", "es", "nl", "se", "no",
   "fi", "pl", "ch", "at", "be", "dk", "cz", "eu", "asia", "kz", "ua", "kr", "hk", "sg", "za", "tr",
 ])
-// Reserved / internal-use TLDs. Hosts under these are internal infrastructure — in a
-// pentest they almost always resolve to in-scope internal IPs, so warning on them is
-// pure noise. We do NOT extract them as scope-check targets (the IP-based scope + the
-// interactive gate on real external hosts cover the real cases).
+// Internal hostnames are scope-check targets when used by known network tools.
+// An internal suffix does not establish authorization; incidental code/text still
+// should not be interpreted as a remote host.
 const INTERNAL_TLDS = new Set([
   "local", "internal", "lan", "corp", "intranet", "home", "localdomain", "localhost",
   "test", "example", "invalid", "arpa",
@@ -173,12 +175,10 @@ function domainTld(domain: string): string {
   const dot = domain.lastIndexOf(".")
   return dot < 0 ? domain : domain.slice(dot + 1)
 }
-// A hostname is worth scope-checking only if it has a real public TLD. Internal-TLD and
-// bare code-token "domains" are skipped.
-function isWarnableHost(host: string): boolean {
+function isWarnableHost(host: string, networkCommand: boolean): boolean {
   if (isIp(host) || isIpv6(host)) return true
   const tld = domainTld(host.toLowerCase())
-  if (INTERNAL_TLDS.has(tld)) return false
+  if (INTERNAL_TLDS.has(tld)) return networkCommand
   return PUBLIC_TLDS.has(tld)
 }
 
@@ -207,6 +207,7 @@ function looksLikeFilename(s: string): boolean {
 
 export function extractTargetsFromCommand(command: string): string[] {
   const targets = new Set<string>()
+  const networkCommand = KNOWN_TOOLS_RE.test(command)
 
   for (const match of command.matchAll(IP_RE)) {
     const ip = match[0]!
@@ -220,7 +221,7 @@ export function extractTargetsFromCommand(command: string): string[] {
       !IGNORE_DOMAINS.has(domain) &&
       domain.includes(".") &&
       !looksLikeFilename(domain) &&
-      isWarnableHost(domain)
+      isWarnableHost(domain, networkCommand)
     ) {
       targets.add(domain)
     }
@@ -235,7 +236,7 @@ export function extractTargetsFromCommand(command: string): string[] {
 
   for (const match of command.matchAll(USER_AT_HOST_RE)) {
     const host = match[1]!
-    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host) && isWarnableHost(host)) {
+    if (!IGNORE_DOMAINS.has(host.toLowerCase()) && !looksLikeFilename(host) && isWarnableHost(host, networkCommand)) {
       targets.add(host)
     }
   }
@@ -249,8 +250,6 @@ export function extractTargetsFromCommand(command: string): string[] {
 
   return [...targets]
 }
-
-const KNOWN_TOOLS_RE = /\b(?:nmap|netexec|crackmapexec|ssh|scp|sftp|curl|wget|smbclient|rpcclient|evil-winrm|psexec|wmiexec|impacket|nuclei|gobuster|feroxbuster|ffuf|sqlmap|hydra|medusa|nikto|dirb|dirsearch)\b/i
 
 export function extractTargetsWithWarning(command: string): { targets: string[]; warning?: string } {
   const targets = extractTargetsFromCommand(command)

@@ -21,6 +21,8 @@ Public adoption evidence is recorded separately in [docs/ADOPTION.md](docs/ADOPT
 
 > **Beta** — expect rough edges. [File an issue](https://github.com/totem-srl/kevlarredops/issues) when something breaks. Use [private vulnerability reporting](https://github.com/totem-srl/kevlarredops/security/advisories/new) for security vulnerabilities.
 
+Run engagements in an isolated environment with explicit target authorization. Shell tools check recognized targets against an active engagement, but command parsing does not contain network access. Read the [security model and validation guide](docs/SECURITY-MODEL.md) before running against real systems.
+
 ## What it does
 
 One instruction in, a full attack chain out:
@@ -160,7 +162,7 @@ Drive a live session with slash commands:
 And set how much rope the agent gets:
 
 - **auto** — runs through the pentest phases autonomously, spawning subagents as needed
-- **free** — no phase structure; responds to your requests directly (bypasses scope checks)
+- **free** — no phase structure; responds to your requests directly. Recognized shell targets still obey the active engagement scope; specialized tools have separate limitations documented in the [security model](docs/SECURITY-MODEL.md).
 - **guided** — step by step; proposes each action and waits for approval
 
 Modes combine with pause behavior — `auto` + `pause always` gives you autonomous execution that stops at every finding for review.

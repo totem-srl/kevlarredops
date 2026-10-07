@@ -659,56 +659,19 @@ export const ShellTool = Tool.define(
                 }),
               )
 
-              // Scope gate — evaluated BEFORE running the command. Genuinely-external
-              // out-of-scope targets are gated interactively: ask the operator to add
-              // them to scope (approve → added + command proceeds; deny → command not run).
-              // Chain-reachable targets (inside a discovered network segment, i.e. reached
-              // via a compromised in-scope host) are auto-in-scope — no prompt. Without an
-              // operator (no TTY) we never block or hang — warn only and proceed. free mode
-              // bypasses the whole gate.
+              // An active engagement's scope applies before execution in every mode.
+              // A discovered network or an approval of a shell command cannot widen
+              // the engagement's authorization. Configure authorized targets first.
               let scopePrefix = ""
               const engStatePre = yield* engStore.get()
-              if (engStatePre && engStatePre.scope.targets.length > 0 && engStatePre.mode !== "free") {
+              if (engStatePre) {
                 const { targets, warning } = ScopeMatcher.extractTargetsWithWarning(params.command)
                 const oos = targets.filter((t) => !ScopeMatcher.checkScope(t, engStatePre.scope).inScope)
-                const segments = engStatePre.network_segments ?? []
-                const external = oos.filter((t) => {
-                  const host = ScopeMatcher.extractHost(t)
-                  if (!ScopeMatcher.isIp(host)) return true // domains: can't segment-check → treat as external
-                  // chain-expansion: reached via a compromised host if inside a discovered segment
-                  return !segments.some((s) => s.cidr && ScopeMatcher.isInCidr(host, s.cidr))
-                })
-                if (external.length > 0) {
-                  const interactive = process.stdin.isTTY === true
-                  if (interactive) {
-                    // Two-button Yes/No: approve adds the target(s) to scope (persists,
-                    // so no re-ask for them) and runs the command; deny skips. No blanket
-                    // "always allow everything" option — each new out-of-scope target is
-                    // the operator's explicit call.
-                    const approved = yield* ctx
-                      .ask({
-                        permission: "scope",
-                        patterns: external,
-                        always: [],
-                        metadata: { scopeExpansion: true, targets: external, command: params.command.slice(0, 200) },
-                      })
-                      .pipe(
-                        Effect.as(true),
-                        Effect.catch(() => Effect.succeed(false)),
-                      )
-                    if (!approved) {
-                      return {
-                        title: "Scope: blocked",
-                        metadata: { output: `blocked out-of-scope: ${external.join(", ")}`, exit: null, truncated: false },
-                        output: `Command not run: out-of-scope target(s) not approved: ${external.join(", ")}.\nApprove to add them to scope, or switch to mode=free to bypass scope checks.`,
-                      }
-                    }
-                    yield* engStore.updateScope({ targets: [...engStatePre.scope.targets, ...external] })
-                    const after = yield* engStore.get()
-                    if (after) yield* engStore.save(after)
-                    scopePrefix = `[SCOPE: added to scope by operator: ${external.join(", ")}]\n\n`
-                  } else {
-                    scopePrefix = `[SCOPE WARNING: out-of-scope target(s) — no operator to approve, not added: ${external.join(", ")}]\n\n`
+                if (oos.length > 0) {
+                  return {
+                    title: "Scope: blocked",
+                    metadata: { output: `blocked out-of-scope: ${oos.join(", ")}`, exit: null, truncated: false },
+                    output: `Command not run: target(s) outside the authorized engagement scope: ${oos.join(", ")}. Configure an engagement with the authorized targets before retrying. Exclusions apply in every mode.`,
                   }
                 }
                 if (warning) scopePrefix = `[${warning}]\n\n` + scopePrefix
