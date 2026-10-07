@@ -2,7 +2,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-const VAULT_DIR = path.join(os.homedir(), ".pentestcode")
+const VAULT_DIR = path.join(process.env.OPENCODE_TEST_HOME ?? os.homedir(), ".pentestcode")
 const VAULT_FILE = path.join(VAULT_DIR, "vault.json")
 
 export type SecretRecord = {

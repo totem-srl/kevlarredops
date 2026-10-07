@@ -4,7 +4,7 @@ import dgram from "node:dgram"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import DESCRIPTION from "./net.txt"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 
 export const Parameters = Schema.Struct({
   op: Schema.Literals(["tcp_send", "udp_send", "banner_grab"]).annotate({ description: "network operation" }),
@@ -119,7 +119,7 @@ export const NetTool = Tool.define(
       ): Effect.Effect<Tool.ExecuteResult> =>
         Effect.gen(function* () {
           const state = yield* store.get()
-          if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+          if (state) {
             const check = ScopeMatcher.checkScope(params.host, state.scope)
             if (!check.inScope) {
               return {

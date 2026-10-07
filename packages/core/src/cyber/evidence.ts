@@ -3,7 +3,7 @@ import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 
-const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
+const ENGAGEMENTS_DIR = path.join(process.env.OPENCODE_TEST_HOME ?? os.homedir(), ".pentestcode", "engagements")
 const MANIFEST_FILE = "manifest.jsonl"
 const BLOBS_DIR = "blobs"
 

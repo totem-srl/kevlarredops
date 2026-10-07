@@ -31,6 +31,26 @@ Implementation:
 - [V2 core bash](../packages/core/src/tool/bash.ts)
 - [Scope matching and command target extraction](../packages/core/src/engagement/scope-matcher.ts)
 
+## Direct HTTP and socket boundaries
+
+The legacy `http_request` and `net` tools check explicit destinations against the active
+engagement's scope. An active empty scope permits no destination, exclusions take priority,
+and `free` mode does not bypass the check. Denied HTTP requests, TCP sends, banner grabs,
+and UDP sends return before network dispatch. These tools check their explicit host or URL
+directly; they do not depend on the shell command extractor's hostname heuristics.
+
+`http_request` reads the engagement after the existing permission request resolves, so a
+scope change or an engagement activated during approval applies to the pending request.
+HTTP redirects remain manual. With no active engagement, the existing HTTP permission flow
+and raw socket behavior remain available.
+
+Implementation and verification:
+
+- [HTTP request tool](../packages/opencode/src/tool/http-request.ts)
+- [Raw network tool](../packages/opencode/src/tool/net.ts)
+- [Network regression tests](../packages/opencode/test/tool/network-scope.test.ts): real
+  loopback servers count requests, connections, and datagrams, including positive cases.
+
 ## Limits and containment
 
 Command extraction is a heuristic. It recognizes literal IPs and selected hostname patterns,
@@ -39,8 +59,8 @@ of scripts, shell variables, subprocesses, redirects, tunnels, DNS resolution, o
 Some hosts and loopback addresses are ignored by the extractor. An unrecognized destination
 can pass the shell check; a warning is not a denial.
 
-Specialized legacy network tools have separate scope implementations; some still allow
-mode-dependent overrides. The shell regression tests do not prove containment of those tools,
+Other specialized legacy network tools have separate scope implementations; some still allow
+mode-dependent overrides. The shell and direct network regression tests do not prove containment of those tools,
 plugins, MCP servers, or delegated agents. Scope state also uses the existing engagement store;
 this change does not establish isolation between concurrent engagements.
 
@@ -67,18 +87,22 @@ bun test test/scope-matcher.test.ts test/scope-matcher-extraction.test.ts test/t
 bun typecheck
 cd ../opencode
 bun test test/tool/shell.test.ts
+bun test test/tool/network-scope.test.ts
 bun test test/config/config.test.ts --test-name-pattern 'global config updates refresh'
 bun typecheck
 ```
 
-The scope fixtures use documentation-only IP addresses and temporary files or mocked process
-dispatch; they do not scan or connect to a target. The legacy tests check whether a marker file
+The shell scope fixtures use documentation-only IP addresses and temporary files or mocked process
+dispatch; they do not scan or connect to a target. The direct network fixtures connect only to
+owned loopback HTTP, TCP, and UDP servers on ephemeral ports. Vault, evidence, and OPSEC paths
+honor the existing test-home environment variable, isolating those tests from user data.
+The legacy shell tests check whether a marker file
 was actually created. The V2 tests check the process service boundary, including a scope change
 while command approval is pending. Matching tests also cover internal network hostnames and
 public suffixes such as `.zip`, `.mov`, and `.security` while retaining code-token regressions.
 
 CI results, runtime containment, identity verification, and project adoption are separate evidence.
-CI explicitly runs the legacy shell and global config cache regressions alongside the core tests and API gates.
+CI explicitly runs the legacy shell, direct network, and global config cache regressions alongside the core tests and API gates.
 The inherited Turbo task still references the previous `opencode` package name; it does not
 prove that the complete legacy `pentestcode` suite runs. Restoring that full suite is separate
 validation work, and a passing shell regression file is not a full legacy-suite result.

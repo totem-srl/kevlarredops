@@ -77,6 +77,10 @@ jobs:
         working-directory: packages/opencode
         run: bun test test/config/config.test.ts --test-name-pattern 'global config updates refresh' --timeout 30000 --only-failures
 
+      - name: Run active network scope regressions
+        working-directory: packages/opencode
+        run: bun test test/tool/network-scope.test.ts --timeout 30000 --only-failures
+
       - name: Check generated client
         if: runner.os == 'Linux'
         working-directory: packages/client

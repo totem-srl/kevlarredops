@@ -1,5 +1,4 @@
 import { Effect, Schema } from "effect"
-import fs from "node:fs/promises"
 import { Evidence } from "@pentestcode/core/cyber/evidence"
 import { Vault } from "@pentestcode/core/cyber/vault"
 import { checkStrictOpsec } from "@pentestcode/core/cyber/boundary"
@@ -7,7 +6,7 @@ import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { readLevel } from "./opsec"
 import DESCRIPTION from "./http-request.txt"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 
 const MAX_BODY_PREVIEW = 8000
 const MAX_EVIDENCE_BODY = 64000
@@ -83,8 +82,16 @@ export const HttpRequestTool = Tool.define(
             }
           }
 
+          yield* ctx.ask({
+            permission: "http_request",
+            patterns: [params.url],
+            always: ["*"],
+            metadata: { method: params.method ?? "GET", host: target.hostname },
+          })
+
+          // Approval never expands authorization; read the current engagement afterwards.
           const state = yield* store.get()
-          if (state && state.scope.targets.length > 0 && state.mode !== "free") {
+          if (state) {
             const check = ScopeMatcher.checkScope(params.url, state.scope)
             if (!check.inScope) {
               return {
@@ -106,13 +113,6 @@ export const HttpRequestTool = Tool.define(
               }
             }
           }
-
-          yield* ctx.ask({
-            permission: "http_request",
-            patterns: [params.url],
-            always: ["*"],
-            metadata: { method: params.method ?? "GET", host: target.hostname },
-          })
 
           const headers: Record<string, string> = {}
           const active = yield* Effect.promise(() => Vault.activeIdentity().catch(() => undefined))
