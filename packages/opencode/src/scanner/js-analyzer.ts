@@ -1,3 +1,5 @@
+import type { ScopedRequest } from "./scoped-request"
+
 const SECRET_PATTERNS: { label: string; pattern: RegExp }[] = [
   { label: "aws_access_key", pattern: /\bAKIA[0-9A-Z]{16}\b/g },
   { label: "google_api_key", pattern: /\bAIza[0-9A-Za-z_-]{35}\b/g },
@@ -85,9 +87,10 @@ function analyzeText(text: string): Pick<JsAnalysis, "secrets" | "endpoints" | "
   return { secrets, endpoints: dedupe(endpoints), spaRoutes: dedupe(spaRoutes), chatbotIndicators }
 }
 
-async function fetchText(url: string, timeoutMs: number): Promise<string | undefined> {
+async function fetchText(url: string, timeoutMs: number, request: ScopedRequest.Request): Promise<string | undefined> {
   try {
-    const response = await fetch(url, {
+    const response = await request(url, {
+      redirect: "manual",
       signal: AbortSignal.timeout(timeoutMs),
       headers: { "user-agent": "pentestcode-scanner/1.0" },
     })
@@ -102,13 +105,14 @@ export async function analyzeJs(input: {
   timeoutMs?: number
   maxFiles?: number
   pace?: () => Promise<void>
+  request?: ScopedRequest.Request
 }): Promise<JsAnalysis> {
   const timeoutMs = input.timeoutMs ?? 10_000
   const maxFiles = input.maxFiles ?? 20
 
   const pageUrl = new URL(input.url)
   await input.pace?.()
-  const html = (await fetchText(pageUrl.toString(), timeoutMs)) ?? ""
+  const html = (await fetchText(pageUrl.toString(), timeoutMs, input.request ?? fetch)) ?? ""
   const combined: string[] = [html]
 
   const scriptSrcs = [...html.matchAll(/<script\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/gi)]
@@ -126,7 +130,7 @@ export async function analyzeJs(input: {
     }
     if (jsUrl.origin !== pageUrl.origin) continue
     await input.pace?.()
-    const text = await fetchText(jsUrl.toString(), timeoutMs)
+    const text = await fetchText(jsUrl.toString(), timeoutMs, input.request ?? fetch)
     if (text === undefined) continue
     combined.push(text)
     filesAnalyzed += 1

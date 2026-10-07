@@ -11,8 +11,9 @@ import { extractForms, extractLinks } from "@/scanner/crawl"
 import { analyzeJs } from "@/scanner/js-analyzer"
 import { dirFuzz, type FuzzHit } from "@/scanner/dir-fuzzer"
 import { createPacer } from "@/scanner/pacer"
+import { ScopedRequest } from "@/scanner/scoped-request"
 import DESCRIPTION from "./bounty-hunt.txt"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 
 export const Parameters = Schema.Struct({
   target: Schema.String.annotate({ description: "Absolute http(s) URL of the bounty target" }),
@@ -104,11 +105,13 @@ export async function discoverOpenApi(
   base: URL,
   timeoutMs: number,
   pace?: () => Promise<void>,
+  request: ScopedRequest.Request = fetch,
 ): Promise<{ url: string; version: string } | undefined> {
   for (const path of OPENAPI_PROBE_PATHS) {
     try {
       await pace?.()
-      const response = await fetch(new URL(path, base).toString(), {
+      const response = await request(new URL(path, base).toString(), {
+        redirect: "manual",
         headers: { "user-agent": "pentestcode-bounty/1.0", accept: "application/json" },
         signal: AbortSignal.timeout(timeoutMs),
       })
@@ -281,6 +284,7 @@ export const BountyHuntTool = Tool.define(
   "bounty_hunt",
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
+    const guard = yield* ScopedRequest.make
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -299,15 +303,12 @@ export const BountyHuntTool = Tool.define(
             return { title: "bounty_hunt · invalid scheme", metadata: {}, output: `Only http/https supported.` }
           }
 
-          const state = yield* store.get()
-          if (state && state.scope.targets.length > 0 && state.mode !== "free") {
-            const check = ScopeMatcher.checkScope(base.hostname, state.scope)
-            if (!check.inScope) {
-              return {
-                title: "bounty_hunt · blocked",
-                metadata: { blocked: true },
-                output: `Blocked: ${base.hostname} is outside engagement scope (${check.reason}).`,
-              }
+          const initial = yield* guard.check(base.toString())
+          if (!initial.inScope) {
+            return {
+              title: "bounty_hunt · blocked",
+              metadata: { blocked: true },
+              output: `Blocked: ${base.hostname} is outside engagement scope (${initial.reason}).`,
             }
           }
 
@@ -318,15 +319,26 @@ export const BountyHuntTool = Tool.define(
             metadata: {},
           })
 
+          const state = yield* store.get()
+          if (state) {
+            const check = ScopeMatcher.checkScope(base.toString(), state.scope)
+            if (!check.inScope) {
+              return {
+                title: "bounty_hunt · blocked",
+                metadata: { blocked: true },
+                output: `Blocked: ${base.hostname} is outside engagement scope (${check.reason}).`,
+              }
+            }
+          }
+
           const timeoutMs = Math.min(Math.max(Math.trunc(params.timeout_ms ?? 10_000), 1_000), 60_000)
           const maxRps = Math.min(Math.max(Math.trunc(params.max_rps ?? 5), 1), 20)
           const pace = createPacer(maxRps)
 
           const page = yield* Effect.promise(async () => {
             await pace()
-            return fetch(base.toString(), {
+            return guard.request(base.toString(), {
               headers: { "user-agent": "pentestcode-bounty/1.0" },
-              redirect: "follow",
               signal: AbortSignal.timeout(timeoutMs),
             })
           })
@@ -334,16 +346,19 @@ export const BountyHuntTool = Tool.define(
 
           const routes = extractLinks(html, base)
           const forms = extractForms(html)
-          const js = yield* Effect.promise(() => analyzeJs({ url: base.toString(), timeoutMs, pace }))
+          const js = yield* Effect.promise(() => analyzeJs({ url: base.toString(), timeoutMs, pace, request: guard.request }))
           const fuzzHits: FuzzHit[] = []
           let fuzzTested = 0
           if (params.fuzz === true) {
-            const fuzzResult = yield* Effect.promise(() => dirFuzz({ baseUrl: base.toString(), timeoutMs, rps: maxRps }))
+            const fuzzResult = yield* Effect.promise(() => dirFuzz({ baseUrl: base.toString(), timeoutMs, rps: maxRps, request: guard.request }))
             fuzzHits.push(...fuzzResult.hits)
             fuzzTested = fuzzResult.tested
           }
 
-          const cnameRecords = yield* Effect.promise(() => dns.resolveCname(base.hostname).catch(() => [] as string[]))
+          const dnsCheck = yield* guard.check(base.hostname)
+          const cnameRecords = ScopeMatcher.isIp(base.hostname) || !dnsCheck.inScope
+            ? []
+            : yield* Effect.promise(() => dns.resolveCname(base.hostname).catch(() => [] as string[]))
           const takeover = matchTakeover({ cname: cnameRecords[0], body: page.status >= 400 ? html : undefined })
 
           const responseHeaders: Record<string, string> = {}
@@ -352,7 +367,7 @@ export const BountyHuntTool = Tool.define(
           })
           const headerSignals = rankHeaderSignals(responseHeaders)
 
-          const openApi = yield* Effect.promise(() => discoverOpenApi(base, Math.min(timeoutMs, 8000), pace))
+          const openApi = yield* Effect.promise(() => discoverOpenApi(base, Math.min(timeoutMs, 8000), pace, guard.request))
 
           const signals = [
             ...rankBountySignals({

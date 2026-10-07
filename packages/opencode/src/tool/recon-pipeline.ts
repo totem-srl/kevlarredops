@@ -6,8 +6,9 @@ import { matchTakeover } from "@pentestcode/core/cyber/takeover"
 import { lookupDefaultCreds } from "@pentestcode/core/cyber/defaultcreds"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
+import { ScopedRequest } from "@/scanner/scoped-request"
 import DESCRIPTION from "./recon-pipeline.txt"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 
 export const Parameters = Schema.Struct({
   target: Schema.String.annotate({ description: "Root domain to enumerate (e.g. example.com)" }),
@@ -62,21 +63,11 @@ export function buildReconPlan(binaries: Set<string>, target: string, maxHosts: 
   return stages
 }
 
-async function resolveHosts(domain: string): Promise<string[]> {
-  try {
-    const records = await dns.resolveCname(`www.${domain}`)
-    void records
-  } catch {
-    // no CNAME is normal for apex domains
-  }
-  const hosts = [domain, `www.${domain}`]
-  return [...new Set(hosts)]
-}
-
 export const ReconPipelineTool = Tool.define(
   "recon_pipeline",
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
+    const guard = yield* ScopedRequest.make
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -97,8 +88,6 @@ export const ReconPipelineTool = Tool.define(
           const binaries = new Set(["subfinder", "amass", "httpx", "nmap"].filter((bin) => Bun.which(bin) !== null))
           const maxHosts = Math.min(Math.max(Math.trunc(params.max_hosts ?? 25), 1), 100)
           const plan = buildReconPlan(binaries, domain, maxHosts)
-          const state = yield* store.get()
-
           if ((params.action ?? "plan") === "plan") {
             const lines = [`Recon plan for ${domain}:`, ""]
             for (const stage of plan) {
@@ -115,14 +104,12 @@ export const ReconPipelineTool = Tool.define(
             }
           }
 
-          if (state && state.scope.targets.length > 0 && state.mode !== "free") {
-            const check = ScopeMatcher.checkScope(domain, state.scope)
-            if (!check.inScope) {
-              return {
-                title: "recon_pipeline · blocked",
-                metadata: { blocked: true },
-                output: `Blocked: ${domain} is outside engagement scope (${check.reason}).`,
-              }
+          const initial = yield* guard.check(domain)
+          if (!initial.inScope) {
+            return {
+              title: "recon_pipeline · blocked",
+              metadata: { blocked: true },
+              output: `Blocked: ${domain} is outside engagement scope (${initial.reason}).`,
             }
           }
 
@@ -133,6 +120,18 @@ export const ReconPipelineTool = Tool.define(
             metadata: {},
           })
 
+          const state = yield* store.get()
+          if (state) {
+            const check = ScopeMatcher.checkScope(domain, state.scope)
+            if (!check.inScope) {
+              return {
+                title: "recon_pipeline · blocked",
+                metadata: { blocked: true },
+                output: `Blocked: ${domain} is outside engagement scope (${check.reason}).`,
+              }
+            }
+          }
+
           const discovered: string[] = []
           const liveUrls: string[] = []
 
@@ -142,7 +141,7 @@ export const ReconPipelineTool = Tool.define(
           if (discoveryStage?.command && discoveryStage.status === "ready") {
             const proc = Bun.spawnSync(discoveryStage.command, { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", timeout: 120_000 })
             discoveryOutput = proc.stdout.toString()
-            discovered.push(...discoveryOutput.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.endsWith(domain)))
+            discovered.push(...discoveryOutput.split(/\r?\n/).map((line) => line.trim().toLowerCase()).filter((line) => line === domain || line.endsWith(`.${domain}`)))
             if (state) {
               yield* Effect.promise(() =>
                 Evidence.put({
@@ -156,19 +155,22 @@ export const ReconPipelineTool = Tool.define(
             }
           }
           if (discovered.length === 0) {
-            discovered.push(...(yield* Effect.promise(() => resolveHosts(domain))))
+            discovered.push(domain, `www.${domain}`)
           }
 
           // http probe
           for (const host of discovered.slice(0, maxHosts)) {
+            const check = yield* guard.check(host)
+            if (!check.inScope) continue
             const url = `https://${host}`
             try {
               const response = yield* Effect.promise(() =>
-                fetch(url, { headers: { "user-agent": "pentestcode-recon/1.0" }, signal: AbortSignal.timeout(8000) }),
+                guard.request(url, { headers: { "user-agent": "pentestcode-recon/1.0" }, signal: AbortSignal.timeout(8000) }),
               )
               const body = yield* Effect.promise(() => response.text())
               liveUrls.push(`${response.status} https://${host}`)
-              if (state) {
+              const dnsCheck = yield* guard.check(host)
+              if (state && dnsCheck.inScope) {
                 const cnameRecords = yield* Effect.promise(() => dns.resolveCname(host).catch(() => [] as string[]))
                 const fingerprint = matchTakeover({ cname: cnameRecords[0], body: response.status >= 400 ? body : undefined })
                 if (fingerprint) {
@@ -193,6 +195,14 @@ export const ReconPipelineTool = Tool.define(
           const scanStage = plan.find((s) => s.stage === "port-scan")
           let scanOutput = ""
           if (scanStage?.command && scanStage.status === "ready") {
+            const check = yield* guard.check(domain)
+            if (!check.inScope) {
+              return {
+                title: "recon_pipeline · blocked",
+                metadata: { blocked: true },
+                output: `Blocked: ${domain} is outside engagement scope (${check.reason}).`,
+              }
+            }
             const proc = Bun.spawnSync(scanStage.command, { cwd: process.cwd(), stdout: "pipe", stderr: "pipe", timeout: 300_000 })
             scanOutput = proc.stdout.toString()
             if (state) {

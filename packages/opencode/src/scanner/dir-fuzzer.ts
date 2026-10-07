@@ -1,4 +1,5 @@
 import { createPacer, type Pacer } from "./pacer"
+import type { ScopedRequest } from "./scoped-request"
 
 const INTERESTING_STATUS = new Set([200, 201, 204, 301, 302, 307, 308, 401, 403])
 
@@ -32,10 +33,11 @@ async function probe(
   base: URL,
   candidate: string,
   timeoutMs: number,
+  request: ScopedRequest.Request,
 ): Promise<{ status: number; length: number } | undefined> {
   const target = new URL(candidate, base)
   try {
-    const response = await fetch(target.toString(), {
+    const response = await request(target.toString(), {
       signal: AbortSignal.timeout(timeoutMs),
       redirect: "manual",
       headers: { "user-agent": "pentestcode-scanner/1.0" },
@@ -53,6 +55,7 @@ export async function dirFuzz(input: {
   timeoutMs?: number
   concurrency?: number
   rps?: number
+  request?: ScopedRequest.Request
 }): Promise<{ hits: FuzzHit[]; tested: number }> {
   const base = new URL(input.baseUrl)
   if (!base.pathname.endsWith("/")) base.pathname = `${base.pathname}/`
@@ -66,13 +69,13 @@ export async function dirFuzz(input: {
   let baselineLength = -1
   if (input.rps) {
     await pace()
-    const baseline = await probe(base, baselinePath, timeoutMs)
+    const baseline = await probe(base, baselinePath, timeoutMs, input.request ?? fetch)
     if (baseline && !INTERESTING_STATUS.has(baseline.status)) {
       baselineStatus = baseline.status
       baselineLength = baseline.length
     }
   } else {
-    const baseline = await probe(base, baselinePath, timeoutMs)
+    const baseline = await probe(base, baselinePath, timeoutMs, input.request ?? fetch)
     if (baseline && !INTERESTING_STATUS.has(baseline.status)) {
       baselineStatus = baseline.status
       baselineLength = baseline.length
@@ -93,7 +96,7 @@ export async function dirFuzz(input: {
   if (input.rps) {
     for (const candidate of candidates) {
       await pace()
-      const result = await probe(base, candidate, timeoutMs)
+      const result = await probe(base, candidate, timeoutMs, input.request ?? fetch)
       if (!result) continue
       if (!INTERESTING_STATUS.has(result.status)) continue
       if (result.status === baselineStatus && Math.abs(result.length - baselineLength) <= 50) continue
@@ -114,7 +117,7 @@ export async function dirFuzz(input: {
     const batch = candidates.slice(i, i + concurrency)
     const results = await Promise.all(
       batch.map(async (candidate) => {
-        const result = await probe(base, candidate, timeoutMs)
+        const result = await probe(base, candidate, timeoutMs, input.request ?? fetch)
         return { candidate, result }
       }),
     )
