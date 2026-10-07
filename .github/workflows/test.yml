@@ -77,6 +77,18 @@ jobs:
         working-directory: packages/opencode
         run: bun test test/config/config.test.ts --test-name-pattern 'global config updates refresh' --timeout 30000 --only-failures
 
+      - name: Run SDK routing regressions
+        timeout-minutes: 2
+        working-directory: packages/sdk/js
+        run: bun test --timeout 30000 --only-failures
+
+      - name: Run SDK and provider server regressions
+        timeout-minutes: 3
+        working-directory: packages/opencode
+        run: |
+          bun test test/server/httpapi-provider.test.ts test/server/proxy-util.test.ts --timeout 30000 --only-failures
+          bun test test/server/httpapi-sdk.test.ts --test-name-pattern 'safe instance routes|configured SDK directory' --timeout 30000 --only-failures
+
       - name: Run active network scope regressions
         working-directory: packages/opencode
         run: bun test test/tool/network-scope.test.ts test/tool/scanner-scope.test.ts test/scanner.test.ts --timeout 30000 --only-failures
