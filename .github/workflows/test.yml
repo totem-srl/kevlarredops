@@ -69,6 +69,10 @@ jobs:
         env:
           OPENCODE_EXPERIMENTAL_DISABLE_FILEWATCHER: ${{ runner.os == 'Windows' && 'true' || 'false' }}
 
+      - name: Run shell scope regressions
+        working-directory: packages/opencode
+        run: bun test test/tool/shell.test.ts --timeout 30000 --only-failures
+
       - name: Check generated client
         if: runner.os == 'Linux'
         working-directory: packages/client
