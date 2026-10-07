@@ -13,7 +13,7 @@ export const Parameters = Schema.Struct({
 })
 
 function engagementDir(name: string) {
-  return path.join(os.homedir(), ".pentestcode", "engagements", name)
+  return path.join(process.env.OPENCODE_TEST_HOME ?? os.homedir(), ".pentestcode", "engagements", name)
 }
 
 function formatStatus(name: string | undefined, level: "normal" | "strict") {
