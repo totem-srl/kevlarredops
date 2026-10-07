@@ -22,6 +22,7 @@ import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 
 const shellLayer = Layer.mergeAll(
@@ -41,6 +42,111 @@ const shellLayer = Layer.mergeAll(
   testInstanceStoreLayer,
 )
 const it = testEffect(shellLayer)
+
+describe("shell engagement scope", () => {
+  const cases = [
+    {
+      name: "blocks an unapproved target without a TTY",
+      free: false,
+      targets: ["198.51.100.1"],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "free mode cannot bypass declared scope",
+      free: true,
+      targets: ["198.51.100.1"],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "a discovered network is not scope authorization",
+      free: false,
+      targets: ["198.51.100.1"],
+      excludes: [],
+      segment: true,
+      blocked: true,
+    },
+    {
+      name: "an exclusion cannot be bypassed by a discovered network",
+      free: false,
+      targets: ["198.51.100.0/24"],
+      excludes: ["198.51.100.2"],
+      segment: true,
+      blocked: true,
+    },
+    {
+      name: "an empty active scope does not authorize a target",
+      free: false,
+      targets: [],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "an explicitly scoped target can execute",
+      free: true,
+      targets: ["198.51.100.2"],
+      excludes: [],
+      segment: false,
+      blocked: false,
+    },
+  ]
+  for (const item of cases) {
+    const state: EngagementSchema.State = {
+      id: EngagementSchema.ID.make("scope-test"),
+      name: "scope-test",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      scope: { targets: item.targets, excludes: item.excludes, notes: "" },
+      hosts: {},
+      credentials: {},
+      flags: [],
+      attack_path: [],
+      task_tree: [],
+      notes: [],
+      current_phase: "recon",
+      mode: item.free ? "free" : "auto",
+      network_segments: item.segment ? [{ id: "discovered", cidr: "198.51.100.0/24" }] : [],
+    }
+    const scoped = testEffect(
+      Layer.mergeAll(
+        shellLayer,
+        Layer.mock(EngagementStore.Service, {
+          get: () => Effect.succeed(state),
+        }),
+      ),
+    )
+    scoped.live(item.name, () =>
+      Effect.gen(function* () {
+        const tmp = yield* tmpdirScoped()
+        const marker = path.join(tmp, "scope-marker")
+        const result = yield* runIn(
+          tmp,
+          run(
+            { command: "echo 198.51.100.2 > scope-marker" },
+            {
+              ...ctx,
+              ask: (request) =>
+                Effect.sync(() => {
+                  if (request.permission === "scope") throw new Error("Scope expansion not approved")
+                }),
+            },
+          ),
+        )
+        expect(yield* Effect.promise(() => Bun.file(marker).exists())).toBe(!item.blocked)
+        if (item.blocked) {
+          expect(result.title).toBe("Scope: blocked")
+          expect(result.metadata.exit).toBeNull()
+        }
+        if (!item.blocked) expect(result.metadata.exit).toBe(0)
+      }),
+    )
+  }
+})
+
 type ShellTestServices =
   | (typeof shellLayer extends Layer.Layer<infer ROut, infer _E, infer _RIn> ? ROut : never)
   | InstanceStore.Service

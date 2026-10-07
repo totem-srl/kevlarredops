@@ -2,10 +2,12 @@ import fs from "fs/promises"
 import { realpathSync } from "node:fs"
 import path from "path"
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Ref } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { FSUtil } from "@pentestcode/core/fs-util"
 import { Config } from "@pentestcode/core/config"
+import { EngagementStore } from "@pentestcode/core/engagement/store"
+import { EngagementSchema } from "@pentestcode/core/engagement/schema"
 import { AppNodeBuilder } from "@pentestcode/core/effect/app-node-builder"
 import { LayerNode } from "@pentestcode/core/effect/layer-node"
 import { Location } from "@pentestcode/core/location"
@@ -101,6 +103,7 @@ const withTool = <A, E, R>(
   directory: string,
   body: (registry: ToolRegistry.Interface) => Effect.Effect<A, E, R>,
   processLayer: Layer.Layer<AppProcess.Service> = appProcess,
+  engagement: Effect.Effect<EngagementSchema.State | undefined> = Effect.succeed(undefined),
 ) => {
   const activeLocation = Layer.succeed(
     Location.Service,
@@ -117,6 +120,7 @@ const withTool = <A, E, R>(
           [PermissionV2.node, permission],
           [AppProcess.node, processLayer],
           [Config.node, config],
+          [EngagementStore.node, Layer.mock(EngagementStore.Service, { get: () => engagement })],
           [ToolOutputStore.node, ToolOutputStore.nodeWithoutConfig],
         ],
       ),
@@ -133,6 +137,127 @@ const call = (input: typeof BashTool.Input.Type, id = "call-bash") => ({
 const it = testEffect(Layer.empty)
 
 describe("BashTool", () => {
+  for (const item of [
+    {
+      name: "blocks an out-of-scope target before process dispatch",
+      free: false,
+      targets: ["198.51.100.1"],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "free mode cannot bypass active scope",
+      free: true,
+      targets: ["198.51.100.1"],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "discovery cannot authorize an excluded target",
+      free: false,
+      targets: ["198.51.100.0/24"],
+      excludes: ["198.51.100.2"],
+      segment: true,
+      blocked: true,
+    },
+    {
+      name: "an empty active scope does not authorize execution",
+      free: false,
+      targets: [],
+      excludes: [],
+      segment: false,
+      blocked: true,
+    },
+    {
+      name: "explicit scope permits the target",
+      free: true,
+      targets: ["198.51.100.2"],
+      excludes: [],
+      segment: false,
+      blocked: false,
+    },
+  ]) {
+    it.live(`engagement scope: ${item.name}`, () =>
+      Effect.acquireUseRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => {
+          reset()
+          const engagement: EngagementSchema.State = {
+            id: EngagementSchema.ID.make("scope-test"),
+            name: "scope-test",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            scope: { targets: item.targets, excludes: item.excludes, notes: "" },
+            hosts: {},
+            credentials: {},
+            flags: [],
+            attack_path: [],
+            task_tree: [],
+            notes: [],
+            current_phase: "recon",
+            mode: item.free ? "free" : "auto",
+            network_segments: item.segment ? [{ id: "discovered", cidr: "198.51.100.0/24" }] : [],
+          }
+          return withTool(
+            tmp.path,
+            (registry) =>
+              Effect.gen(function* () {
+                const settlement = yield* settleTool(registry, call({ command: "echo 198.51.100.2 > scope-marker" }))
+                expect(runs).toHaveLength(item.blocked ? 0 : 1)
+                expect(settlement).toMatchObject({
+                  output: { structured: { exit: item.blocked ? 1 : 0, truncated: false } },
+                })
+              }),
+            appProcess,
+            Effect.succeed(engagement),
+          )
+        },
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      ),
+    )
+  }
+
+  it.live("engagement scope: rechecks after command approval", () =>
+    Effect.acquireUseRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) =>
+        Effect.gen(function* () {
+          reset()
+          const initial: EngagementSchema.State = {
+            id: EngagementSchema.ID.make("scope-test"),
+            name: "scope-test",
+            created_at: "2026-01-01T00:00:00Z",
+            updated_at: "2026-01-01T00:00:00Z",
+            scope: { targets: ["198.51.100.2"], excludes: [], notes: "" },
+            hosts: {},
+            credentials: {},
+            flags: [],
+            attack_path: [],
+            task_tree: [],
+            notes: [],
+            current_phase: "recon",
+            mode: "auto",
+          }
+          const active = yield* Ref.make(initial)
+          afterPermission = (input) =>
+            input.action === "bash"
+              ? Ref.set(active, { ...initial, scope: { targets: ["198.51.100.1"], excludes: [], notes: "" } })
+              : Effect.void
+          const settlement = yield* withTool(
+            tmp.path,
+            (registry) => settleTool(registry, call({ command: "echo 198.51.100.2" })),
+            appProcess,
+            Ref.get(active),
+          )
+          expect(runs).toHaveLength(0)
+          expect(settlement).toMatchObject({ output: { structured: { exit: 1, truncated: false } } })
+        }),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+    ),
+  )
+
   it.live("registers and returns structured successful output from the active Location", () =>
     Effect.acquireUseRelease(
       Effect.promise(() => tmpdir()),

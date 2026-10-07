@@ -2,10 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 
 // Regression: the dev.3 range-3 session flooded almost every python-in-bash command
-// with "[SCOPE WARNING: possible out-of-scope targets: json.load, sys.stdin,
-// socket.socket, s.recv, mail-dmz.range3.local]". The extractor matched code tokens
-// and internal hostnames as hosts. These must NOT be extracted.
-describe("extractTargetsFromCommand — no code-token / internal false positives", () => {
+// with warnings about json.load, sys.stdin, socket.socket, and s.recv. Code tokens
+// must not be treated as hosts; actual internal network targets still require scope.
+describe("extractTargetsFromCommand — no code-token false positives", () => {
   const codeCommands = [
     `python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('x'))"`,
     `python3 - <<'EOF'\ns=socket.socket(); s.settimeout(5); s.connect((h,p)); s.recv(4096); s.sendall(b'x'); s.close()\nEOF`,
@@ -18,14 +17,21 @@ describe("extractTargetsFromCommand — no code-token / internal false positives
     })
   }
 
-  test("internal-TLD hostnames are not flagged (in-scope infra by convention)", () => {
-    expect(ScopeMatcher.extractTargetsFromCommand(`curl http://mail-dmz.range3.local/`)).toEqual([])
+  test("SMTP EHLO identifies the sender rather than a remote target", () => {
     expect(ScopeMatcher.extractTargetsFromCommand(`smtp EHLO t.local`)).toEqual([])
-    expect(ScopeMatcher.extractTargetsFromCommand(`ssh user@queue-dmz.internal`)).toEqual([])
   })
 })
 
 describe("extractTargetsFromCommand — real targets still extracted", () => {
+  test("internal targets used by network tools are not implicitly authorized", () => {
+    expect(ScopeMatcher.extractTargetsFromCommand(`curl http://mail-dmz.range3.local/`)).toContain("mail-dmz.range3.local")
+    expect(ScopeMatcher.extractTargetsFromCommand(`ssh user@queue-dmz.internal`)).toContain("queue-dmz.internal")
+  })
+  test("code tokens remain filtered alongside a network command", () => {
+    expect(
+      ScopeMatcher.extractTargetsFromCommand(`nmap dc01.corp.local; python3 -c "print(json.load(sys.stdin))"`),
+    ).toEqual(["dc01.corp.local"])
+  })
   test("IPv4 addresses", () => {
     const t = ScopeMatcher.extractTargetsFromCommand(`curl http://172.50.1.10:3000/ ; nmap 172.50.2.20`)
     expect(t).toContain("172.50.1.10")

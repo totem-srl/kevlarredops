@@ -371,6 +371,22 @@ it.instance("updates config and preserves empty shell sentinel", () =>
   }),
 )
 
+it.effect("global config updates refresh cached configs without an active instance", () =>
+  withGlobalConfig({ config: { username: "before" } }, () =>
+    Effect.gen(function* () {
+      const first = yield* tmpdirScoped()
+      const second = yield* tmpdirScoped()
+      expect((yield* withInstanceDir(first, Config.use.get())).username).toBe("before")
+      expect((yield* withInstanceDir(second, Config.use.get())).username).toBe("before")
+
+      yield* Config.use.updateGlobal({ username: "after" })
+
+      expect((yield* withInstanceDir(first, Config.use.get())).username).toBe("after")
+      expect((yield* withInstanceDir(second, Config.use.get())).username).toBe("after")
+    }),
+  ),
+)
+
 it.effect("updates global config and omits empty shell key in json", () =>
   withGlobalConfig({ config: { shell: "bash" } }, ({ dir }) =>
     Effect.gen(function* () {

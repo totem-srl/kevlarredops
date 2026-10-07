@@ -5,6 +5,8 @@ import { ToolFailure } from "@pentestcode/llm"
 import { Duration, Effect, Layer, Schema } from "effect"
 import { ChildProcess } from "effect/unstable/process"
 import { Config } from "../config"
+import { EngagementStore } from "../engagement/store"
+import { ScopeMatcher } from "../engagement/scope-matcher"
 import { makeLocationNode } from "../effect/app-node"
 import { FSUtil } from "../fs-util"
 import { LocationMutation } from "../location-mutation"
@@ -103,11 +105,12 @@ const layer = Layer.effectDiscard(
     const appProcess = yield* AppProcess.Service
     const config = yield* Config.Service
     const permission = yield* PermissionV2.Service
+    const engagement = yield* EngagementStore.Service
 
     yield* tools
       .register({
         [name]: Tool.make({
-          description: `Execute one shell command string with the host user's filesystem, process, and network authority. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
+          description: `Execute one shell command string with the host user's filesystem, process, and network authority. Recognized network targets must match the active engagement scope in every mode; command parsing is not a network sandbox. The active Location is the default working directory. Relative workdir values resolve from that Location. External workdir values require external_directory approval; best-effort command-argument path warnings are advisory only. Timeout values are milliseconds (default: ${DEFAULT_TIMEOUT_MS}; maximum: ${MAX_TIMEOUT_MS}). Uses the configured shell when set; otherwise uses /bin/sh on POSIX and COMSPEC or cmd.exe on Windows.`,
           input: Input,
           output: Output,
           structured: StructuredOutput,
@@ -168,6 +171,20 @@ const layer = Layer.effectDiscard(
               const shell =
                 Object.assign({}, ...entries.flatMap((entry) => (entry.type === "document" ? [entry.info] : [])))
                   .shell ?? defaultShell()
+              // Approval can be asynchronous: use the active scope after it settles.
+              const state = yield* engagement.get()
+              if (state) {
+                const scope = ScopeMatcher.extractTargetsWithWarning(input.command)
+                const denied = scope.targets.filter((host) => !ScopeMatcher.checkScope(host, state.scope).inScope)
+                if (denied.length) {
+                  return {
+                    output: `Scope: blocked. Target(s) outside the authorized engagement scope: ${denied.join(", ")}. Configure an engagement with the authorized targets before retrying.`,
+                    exit: 1,
+                    truncated: false,
+                  }
+                }
+                if (scope.warning) warnings.push(scope.warning)
+              }
               const command = ChildProcess.make(input.command, [], {
                 cwd: target.canonical,
                 shell,
@@ -216,5 +233,13 @@ const layer = Layer.effectDiscard(
 export const node = makeLocationNode({
   name: "tool/bash",
   layer,
-  deps: [ToolRegistry.node, LocationMutation.node, FSUtil.node, AppProcess.node, Config.node, PermissionV2.node],
+  deps: [
+    ToolRegistry.node,
+    LocationMutation.node,
+    FSUtil.node,
+    AppProcess.node,
+    Config.node,
+    PermissionV2.node,
+    EngagementStore.node,
+  ],
 })

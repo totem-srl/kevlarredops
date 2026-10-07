@@ -117,8 +117,8 @@ const scenarios: Scenario[] = [
     ),
   http.protected.get("/path", "path.get").json(200, (body, ctx) => {
     object(body)
-    check(body.directory === ctx.directory, "directory should resolve from x-opencode-directory")
-    check(body.worktree === ctx.directory, "worktree should resolve from x-opencode-directory")
+    check(body.directory === ctx.directory, "directory should resolve from x-pentestcode-directory")
+    check(body.worktree === ctx.directory, "worktree should resolve from x-pentestcode-directory")
   }),
   http.protected.get("/vcs", "vcs.get").json(),
   http.protected.get("/vcs/status", "vcs.status").json(200, array),
@@ -789,7 +789,7 @@ const scenarios: Scenario[] = [
     .post("/api/pty/{ptyID}/connect-token", "v2.pty.connectToken")
     .at((ctx) => ({
       path: route("/api/pty/{ptyID}/connect-token", { ptyID: "pty_httpapi_missing" }),
-      headers: { ...ctx.headers(), "x-opencode-ticket": "1" },
+      headers: { ...ctx.headers(), "x-pentestcode-ticket": "1" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -1453,7 +1453,7 @@ const scenarios: Scenario[] = [
       path: route("/session/{sessionID}/message", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
       body: {
-        agent: "build",
+        agent: "pentest",
         model: { providerID: "test", modelID: "test-model" },
         parts: [{ type: "text", text: "hello llm" }],
       },
@@ -1488,7 +1488,7 @@ const scenarios: Scenario[] = [
       path: route("/session/{sessionID}/prompt_async", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
       body: {
-        agent: "build",
+        agent: "pentest",
         model: { providerID: "test", modelID: "test-model" },
         parts: [{ type: "text", text: "hello async" }],
       },
@@ -1533,7 +1533,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/session/{sessionID}/shell", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
-      body: { agent: "build", model: { providerID: "test", modelID: "test-model" }, command: "printf shell-ok" },
+      body: { agent: "pentest", model: { providerID: "test", modelID: "test-model" }, command: "printf shell-ok" },
     }))
     .json(
       200,

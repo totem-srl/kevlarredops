@@ -33,3 +33,7 @@ and reporting policies; this policy applies to the Totem repository.
 Use isolated labs or systems for which you have explicit testing permission.
 This policy provides a reporting process for KevlarRedOps; it does not authorize testing
 third-party targets, providers, accounts, or production deployments.
+
+The [security model](docs/SECURITY-MODEL.md) describes the shell scope checks,
+regression tests, operational containment requirements, and remaining limitations.
+Scope validation and command approval do not constitute an operating-system or network sandbox.
