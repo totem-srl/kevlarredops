@@ -67,6 +67,7 @@ bun test test/scope-matcher.test.ts test/scope-matcher-extraction.test.ts test/t
 bun typecheck
 cd ../opencode
 bun test test/tool/shell.test.ts
+bun test test/config/config.test.ts --test-name-pattern 'global config updates refresh'
 bun typecheck
 ```
 
@@ -77,7 +78,7 @@ while command approval is pending. Matching tests also cover internal network ho
 public suffixes such as `.zip`, `.mov`, and `.security` while retaining code-token regressions.
 
 CI results, runtime containment, identity verification, and project adoption are separate evidence.
-CI explicitly runs the legacy shell regression file alongside the core tests and API gates.
+CI explicitly runs the legacy shell and global config cache regressions alongside the core tests and API gates.
 The inherited Turbo task still references the previous `opencode` package name; it does not
 prove that the complete legacy `pentestcode` suite runs. Restoring that full suite is separate
 validation work, and a passing shell regression file is not a full legacy-suite result.

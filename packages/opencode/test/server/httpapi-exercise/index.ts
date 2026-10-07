@@ -789,7 +789,7 @@ const scenarios: Scenario[] = [
     .post("/api/pty/{ptyID}/connect-token", "v2.pty.connectToken")
     .at((ctx) => ({
       path: route("/api/pty/{ptyID}/connect-token", { ptyID: "pty_httpapi_missing" }),
-      headers: { ...ctx.headers(), "x-opencode-ticket": "1" },
+      headers: { ...ctx.headers(), "x-pentestcode-ticket": "1" },
     }))
     .json(404, object, "status"),
   http.protected
@@ -1453,7 +1453,7 @@ const scenarios: Scenario[] = [
       path: route("/session/{sessionID}/message", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
       body: {
-        agent: "build",
+        agent: "pentest",
         model: { providerID: "test", modelID: "test-model" },
         parts: [{ type: "text", text: "hello llm" }],
       },
@@ -1488,7 +1488,7 @@ const scenarios: Scenario[] = [
       path: route("/session/{sessionID}/prompt_async", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
       body: {
-        agent: "build",
+        agent: "pentest",
         model: { providerID: "test", modelID: "test-model" },
         parts: [{ type: "text", text: "hello async" }],
       },
@@ -1533,7 +1533,7 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({
       path: route("/session/{sessionID}/shell", { sessionID: ctx.state.id }),
       headers: ctx.headers(),
-      body: { agent: "build", model: { providerID: "test", modelID: "test-model" }, command: "printf shell-ok" },
+      body: { agent: "pentest", model: { providerID: "test", modelID: "test-model" }, command: "printf shell-ok" },
     }))
     .json(
       200,

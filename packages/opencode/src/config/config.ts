@@ -18,7 +18,7 @@ import { isRecord } from "@/util/record"
 import type { ConsoleState } from "@pentestcode/core/v1/config/console-state"
 import { FSUtil } from "@pentestcode/core/fs-util"
 import { InstanceState } from "@/effect/instance-state"
-import { Context, Duration, Effect, Exit, Fiber, Layer, Option, Schema } from "effect"
+import { Context, Duration, Effect, Exit, Fiber, Layer, Option, Schema, ScopedCache } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { EffectFlock } from "@pentestcode/core/util/effect-flock"
 import { containsPath, type InstanceContext } from "../project/instance-context"
@@ -637,11 +637,9 @@ const layer = Layer.effect(
 
     const invalidate = Effect.fn("Config.invalidate")(function* () {
       yield* invalidateGlobal
-      // Also drop the per-directory merged-config cache that get() serves —
-      // invalidating only cachedGlobal left get() returning the boot-time config,
-      // so a config change from the UI (e.g. /small-model) never took effect in a
-      // running session until a full restart.
-      yield* InstanceState.invalidate(state)
+      // Global changes affect every cached directory and can be requested without
+      // an InstanceRef. Keep all merged configs in sync with cachedGlobal.
+      yield* ScopedCache.invalidateAll(state.cache)
     })
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
