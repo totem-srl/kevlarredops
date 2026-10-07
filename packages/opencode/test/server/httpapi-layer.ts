@@ -21,13 +21,13 @@ export const httpApiLayer = servedRoutes.pipe(
 export function request(path: string, init?: RequestInit) {
   const url = new URL(path, "http://localhost")
   return HttpClientRequest.fromWeb(new Request(url, init)).pipe(
-    HttpClientRequest.setUrl(url.pathname),
+    HttpClientRequest.setUrl(url.pathname + url.search),
     HttpClient.execute,
   )
 }
 
 export function requestInDirectory(path: string, directory: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers)
-  headers.set("x-opencode-directory", directory)
+  headers.set("x-pentestcode-directory", directory)
   return request(path, { ...init, headers })
 }
