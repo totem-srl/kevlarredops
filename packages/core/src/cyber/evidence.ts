@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
 import fs from "node:fs/promises"
-import os from "node:os"
 import path from "node:path"
+import { Schema } from "effect"
+import { FindingStore } from "./finding-store"
 
-const ENGAGEMENTS_DIR = path.join(process.env.OPENCODE_TEST_HOME ?? os.homedir(), ".pentestcode", "engagements")
 const MANIFEST_FILE = "manifest.jsonl"
 const BLOBS_DIR = "blobs"
 
@@ -18,7 +18,7 @@ export type Entry = {
 }
 
 function engagementDir(engagementName: string): string {
-  return path.join(ENGAGEMENTS_DIR, engagementName)
+  return FindingStore.directory(engagementName)
 }
 
 function evidenceDir(engagementName: string): string {
@@ -60,22 +60,29 @@ function sniffExtFromMime(mime: string): string {
   return MIME_EXT[base] ?? ".bin"
 }
 
+const EntrySchema = Schema.Struct({
+  sha256: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  ext: Schema.String.check(Schema.isPattern(/^\.[a-z0-9]+$/)),
+  size: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  mime: Schema.String,
+  label: Schema.String,
+  source: Schema.String,
+  at: Schema.String,
+})
+
 async function readManifest(engagementName: string): Promise<Entry[]> {
-  const entries: Entry[] = []
+  const raw = await fs.readFile(manifestPath(engagementName), "utf8").catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
   try {
-    const raw = await fs.readFile(manifestPath(engagementName), "utf8")
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue
-      try {
-        entries.push(JSON.parse(line) as Entry)
-      } catch {
-        // skip malformed manifest lines
-      }
-    }
+    return raw
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => Schema.decodeUnknownSync(EntrySchema)(JSON.parse(line)))
   } catch {
-    // no manifest yet
+    throw new Error("Invalid evidence manifest. Repair manifest.jsonl before using evidence.")
   }
-  return entries
 }
 
 async function appendManifestLine(engagementName: string, entry: Entry): Promise<void> {
@@ -135,21 +142,25 @@ export async function list(engagementName: string): Promise<Entry[]> {
   return readManifest(engagementName)
 }
 
-export async function get(
-  engagementName: string,
-  ref: string,
-): Promise<{ path: string; entry: Entry } | undefined> {
+export async function get(engagementName: string, ref: string): Promise<{ path: string; entry: Entry } | undefined> {
   const entries = await readManifest(engagementName)
-  const bySha = entries.find((e) => e.sha256 === ref || e.sha256.startsWith(ref))
-  const match = bySha ?? entries.find((e) => e.label === ref)
+  if (!ref.trim()) return undefined
+  const bySha = /^[a-f0-9]{8,64}$/.test(ref) ? entries.filter((e) => e.sha256.startsWith(ref)) : []
+  const matches = bySha.length ? bySha : entries.filter((e) => e.label === ref)
+  if (new Set(matches.map((e) => e.sha256)).size > 1)
+    throw new Error("Ambiguous evidence reference; use the full SHA-256.")
+  const match = matches[0]
   if (!match) return undefined
   const target = blobPath(engagementName, match.sha256, match.ext)
-  try {
-    await fs.access(target)
-    return { path: target, entry: match }
-  } catch {
-    return undefined
+  const content = await fs.readFile(target).catch((error: unknown) => {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined
+    throw error
+  })
+  if (!content) return undefined
+  if (content.length !== match.size || createHash("sha256").update(content).digest("hex") !== match.sha256) {
+    throw new Error("Evidence integrity check failed; stored bytes do not match the manifest.")
   }
+  return { path: target, entry: match }
 }
 
 export * as Evidence from "./evidence"

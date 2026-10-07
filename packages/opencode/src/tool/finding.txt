@@ -3,9 +3,15 @@ against evidence and replay material, and only verified findings with evidence p
 (or a structured, justified replay exemption) are reportable.
 
 Actions:
-- list: bucketed summary of all findings (reportable / unverified / no evidence / no replay / rejected / stale)
+- list: reportable findings, a verification queue with blocking reasons, and excluded
+  lifecycle records. Rechecks scope and evidence integrity using the report's snapshot builder.
 - status: detail for one finding id
-- promote: verify a candidate by attaching evidence refs and either replay material or an exemption
+- promote: record operator verification with an affected target authorized by the current scope,
+  resolving evidence refs and either replay material or a justified exemption. New findings require
+  target. References are canonicalized to SHA-256; prefixes must be at least 8 characters and
+  labels must be unambiguous. Missing or altered artifacts cannot be promoted. Repeated promotion
+  preserves prior replay unless a replacement is supplied. This tool records verification; it
+  does not independently execute or judge the submitted replay material.
 - reject: mark a candidate rejected with a note
 
 Use this at report time: `list` tells you exactly which findings still block the report.

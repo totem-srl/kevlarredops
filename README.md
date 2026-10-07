@@ -62,11 +62,26 @@ distribution paths; they do not identify a KevlarRedOps release or establish ado
 
 ```bash
 pentestcode auth login          # connect your LLM provider
+pentestcode doctor              # local prerequisites; no scan or model call
 pentestcode                     # interactive session
 pentestcode --prompt "scan 10.10.10.0/24 and enumerate all services"   # one-shot
 ```
 
 Works with 20+ providers through [ai-sdk](https://github.com/vercel/ai) — Anthropic, OpenAI, Google, Azure, AWS Bedrock, Ollama, and more.
+
+Export a saved engagement without a model call:
+
+```bash
+pentestcode doctor --engagement lab --strict
+pentestcode report lab --format html --output lab-report.html
+pentestcode report lab --format json --fail-on-pending
+```
+
+Reports separate verified findings from observations awaiting review, check stored evidence
+against SHA-256, and redact recorded credential values. HTML is self-contained and printable;
+Markdown and versioned JSON use the same snapshot. Read the [reporting guide](docs/REPORTING.md)
+for promotion, compatibility, exit codes, and sharing limits. The [competitor analysis](docs/research/COMPETITORS-2026-10.md)
+explains the product priorities against seven public references.
 
 ## How it works
 
@@ -125,7 +140,8 @@ State survives the session: close the terminal, come back tomorrow, and the agen
 | `attack_path_suggest` | Cost-based path finding through the relationship graph |
 | `tunnel_manage` | Plan SSH/chisel/ligolo tunnels, track live sessions |
 | `phase_control` | Phase management with quality gates |
-| `report_gen` | Generate markdown/JSON pentest reports |
+| `finding` | Promote reviewed findings with authorized targets, stored evidence and replay or justified exemption |
+| `report_gen` | Export evidence-backed Markdown/JSON/HTML snapshots with a separate verification queue |
 | `state_update` | Record findings (30+ mutation types, batch mode) |
 | `state_query` | Query engagement state (20+ query types) |
 

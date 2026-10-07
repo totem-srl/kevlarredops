@@ -1,3 +1,5 @@
+import { Schema } from "effect"
+
 export type FindingStatus = "candidate" | "verified" | "rejected" | "stale"
 
 export type ReplayExemptionCategory =
@@ -27,6 +29,36 @@ export type FindingRecord = {
   at: string
 }
 
+export const RecordSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  status: Schema.Literals(["candidate", "verified", "rejected", "stale"]),
+  severity: Schema.optional(Schema.String),
+  target: Schema.optional(Schema.String),
+  detail: Schema.optional(Schema.String),
+  evidence_refs: Schema.mutable(Schema.Array(Schema.String)),
+  replay: Schema.Union([
+    Schema.Struct({ present: Schema.Literal(true) }),
+    Schema.Struct({
+      present: Schema.Literal(false),
+      exemption: Schema.optional(
+        Schema.Struct({
+          category: Schema.Literals([
+            "destructive_target",
+            "operator_controlled_state",
+            "external_dependency",
+            "time_bound_access",
+            "legacy_unspecified",
+          ]),
+          rationale: Schema.String,
+        }),
+      ),
+    }),
+  ]),
+  superseded_by: Schema.optional(Schema.String),
+  at: Schema.String,
+})
+
 export const REPLAY_EXEMPTION_CATEGORIES: ReplayExemptionCategory[] = [
   "destructive_target",
   "operator_controlled_state",
@@ -38,7 +70,9 @@ export const REPLAY_EXEMPTION_CATEGORIES: ReplayExemptionCategory[] = [
 // A finding is reportable only when it is verified, backed by evidence,
 // and either has replay material or a structured, reasoned replay exemption.
 export function isReportableFinding(finding: FindingRecord): boolean {
+  if (finding.superseded_by) return false
   if (finding.status !== "verified") return false
+  if (!finding.target?.trim()) return false
   if (finding.evidence_refs.length === 0) return false
   if (finding.replay.present) return true
   return finding.replay.exemption !== undefined && finding.replay.exemption.rationale.trim().length > 0
@@ -51,6 +85,7 @@ export function bucketFindings(findings: FindingRecord[]): {
   noReplay: FindingRecord[]
   rejected: FindingRecord[]
   stale: FindingRecord[]
+  superseded: FindingRecord[]
 } {
   const buckets = {
     reportable: [] as FindingRecord[],
@@ -59,8 +94,13 @@ export function bucketFindings(findings: FindingRecord[]): {
     noReplay: [] as FindingRecord[],
     rejected: [] as FindingRecord[],
     stale: [] as FindingRecord[],
+    superseded: [] as FindingRecord[],
   }
   for (const finding of findings) {
+    if (finding.superseded_by) {
+      buckets.superseded.push(finding)
+      continue
+    }
     if (isReportableFinding(finding)) {
       buckets.reportable.push(finding)
       continue
@@ -94,9 +134,7 @@ export function normalizeFindingRecords(records: FindingRecord[]): FindingRecord
     byId.set(record.id, record)
   }
   const normalized = [...byId.values()]
-  const liveIds = new Set(
-    normalized.filter((r) => !r.superseded_by).map((r) => r.id),
-  )
+  const liveIds = new Set(normalized.filter((r) => !r.superseded_by).map((r) => r.id))
   return normalized.filter((r) => {
     if (!r.superseded_by) return true
     // drop tombstones whose superseder never materialized
@@ -113,9 +151,12 @@ export function formatBucketSummary(records: FindingRecord[]): string {
   lines.push(`verified without replay/exemption: ${buckets.noReplay.length}`)
   lines.push(`rejected: ${buckets.rejected.length}`)
   lines.push(`stale: ${buckets.stale.length}`)
+  lines.push(`superseded: ${buckets.superseded.length}`)
   if (buckets.noReplay.length > 0) {
     lines.push("")
-    lines.push("Verified findings missing replay need replay material or a structured ReplayExemption before they are reportable:")
+    lines.push(
+      "Verified findings missing replay need replay material or a structured ReplayExemption before they are reportable:",
+    )
     for (const f of buckets.noReplay) lines.push(`- ${f.id}: ${f.title}`)
   }
   return lines.join("\n")

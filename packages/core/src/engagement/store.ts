@@ -8,7 +8,7 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 
-const ENGAGEMENTS_DIR = path.join(os.homedir(), ".pentestcode", "engagements")
+const ENGAGEMENTS_DIR = path.join(process.env.OPENCODE_TEST_HOME ?? os.homedir(), ".pentestcode", "engagements")
 const LAST_FILE = ".last"
 const SELECTED_FILE = ".selected"
 const CHANGELOG_FILE = "changelog.json"

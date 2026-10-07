@@ -99,8 +99,11 @@ before starting, and preserve the tested commit and environment configuration.
 
 Treat engagement state, credentials, command output, and reports as sensitive.
 Use lab credentials, redact shared evidence, and define retention and deletion procedures
-for the environment you operate. Do not interpret this guide as a promise of encrypted storage,
-automatic redaction, or provider data-retention settings.
+for the environment you operate. The report exporter redacts recorded credential values,
+their URI-encoded values and Basic-auth representations in text; it does not embed raw evidence
+blobs. This is a limited sharing safeguard, not general DLP: other sensitive text and raw blobs
+still require review. See [reporting](REPORTING.md). Do not interpret this guide as a promise
+of encrypted storage or provider data-retention settings.
 
 ## Reproducible regression checks
 
