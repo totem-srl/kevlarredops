@@ -86,7 +86,7 @@ async function readManifest(engagementName: string): Promise<Entry[]> {
 }
 
 async function appendManifestLine(engagementName: string, entry: Entry): Promise<void> {
-  await fs.mkdir(evidenceDir(engagementName), { recursive: true })
+  await fs.mkdir(evidenceDir(engagementName), { recursive: true, mode: 0o700 })
   await fs.appendFile(manifestPath(engagementName), `${JSON.stringify(entry)}\n`, { mode: 0o600 })
 }
 
@@ -121,7 +121,7 @@ export async function put(input: {
     const existing = await readManifest(input.engagementName)
     const prior = existing.find((e) => e.sha256 === sha256 && e.label === (input.label ?? ""))
     const target = blobPath(input.engagementName, sha256, ext)
-    await fs.mkdir(path.dirname(target), { recursive: true })
+    await fs.mkdir(path.dirname(target), { recursive: true, mode: 0o700 })
     await fs.writeFile(target, buf, { mode: 0o600 })
     if (prior) return prior
     const entry: Entry = {

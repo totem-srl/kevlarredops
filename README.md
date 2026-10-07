@@ -75,10 +75,14 @@ Export a saved engagement without a model call:
 pentestcode doctor --engagement lab --strict
 pentestcode report lab --format html --output lab-report.html
 pentestcode report lab --format json --fail-on-pending
+pentestcode findings lab --json
+pentestcode findings lab --action history --id lab-review-01
 ```
 
 Reports separate verified findings from observations awaiting review, check stored evidence
-against SHA-256, and redact recorded credential values. HTML is self-contained and printable;
+against SHA-256, and redact recorded credential values. Findings carry ownership, impact,
+reproduction steps and remediation. Reviewed retests can resolve or reopen a finding while
+preserving the original proof and revision history. HTML is self-contained and printable;
 Markdown and versioned JSON use the same snapshot. Read the [reporting guide](docs/REPORTING.md)
 for promotion, compatibility, exit codes, and sharing limits. The [competitor analysis](docs/research/COMPETITORS-2026-10.md)
 explains the product priorities against seven public references.

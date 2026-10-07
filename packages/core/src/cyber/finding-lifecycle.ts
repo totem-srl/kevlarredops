@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 
-export type FindingStatus = "candidate" | "verified" | "rejected" | "stale"
+export type FindingStatus = "candidate" | "verified" | "resolved" | "rejected" | "stale"
 
 export type ReplayExemptionCategory =
   | "destructive_target"
@@ -16,6 +16,15 @@ export type ReplayExemption = {
 
 export type ReplayState = { present: true } | ({ present: false } & { exemption?: ReplayExemption })
 
+export type Retest = {
+  outcome: "resolved" | "still_vulnerable" | "inconclusive"
+  reviewer: string
+  note: string
+  evidence_refs: string[]
+  replay: ReplayState
+  at: string
+}
+
 export type FindingRecord = {
   id: string
   title: string
@@ -23,38 +32,63 @@ export type FindingRecord = {
   severity?: string
   target?: string
   detail?: string
+  owner?: string
+  reviewer?: string
+  impact?: string
+  remediation?: string
+  reproduction_steps?: string[]
+  retests?: Retest[]
+  review_note?: string
   evidence_refs: string[]
   replay: ReplayState
   superseded_by?: string
   at: string
 }
 
+export const ReplaySchema = Schema.Union([
+  Schema.Struct({ present: Schema.Literal(true) }),
+  Schema.Struct({
+    present: Schema.Literal(false),
+    exemption: Schema.optional(
+      Schema.Struct({
+        category: Schema.Literals([
+          "destructive_target",
+          "operator_controlled_state",
+          "external_dependency",
+          "time_bound_access",
+          "legacy_unspecified",
+        ]),
+        rationale: Schema.String,
+      }),
+    ),
+  }),
+])
+
+export const RetestSchema = Schema.Struct({
+  outcome: Schema.Literals(["resolved", "still_vulnerable", "inconclusive"]),
+  reviewer: Schema.String,
+  note: Schema.String,
+  evidence_refs: Schema.mutable(Schema.Array(Schema.String)),
+  replay: ReplaySchema,
+  at: Schema.String,
+})
+
 export const RecordSchema = Schema.Struct({
   id: Schema.String,
   title: Schema.String,
-  status: Schema.Literals(["candidate", "verified", "rejected", "stale"]),
+  status: Schema.Literals(["candidate", "verified", "resolved", "rejected", "stale"]),
   severity: Schema.optional(Schema.String),
   target: Schema.optional(Schema.String),
   detail: Schema.optional(Schema.String),
+  owner: Schema.optional(Schema.String),
+  reviewer: Schema.optional(Schema.String),
+  impact: Schema.optional(Schema.String),
+  remediation: Schema.optional(Schema.String),
+  reproduction_steps: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
+  retests: Schema.optional(Schema.mutable(Schema.Array(RetestSchema))),
+  review_note: Schema.optional(Schema.String),
   evidence_refs: Schema.mutable(Schema.Array(Schema.String)),
-  replay: Schema.Union([
-    Schema.Struct({ present: Schema.Literal(true) }),
-    Schema.Struct({
-      present: Schema.Literal(false),
-      exemption: Schema.optional(
-        Schema.Struct({
-          category: Schema.Literals([
-            "destructive_target",
-            "operator_controlled_state",
-            "external_dependency",
-            "time_bound_access",
-            "legacy_unspecified",
-          ]),
-          rationale: Schema.String,
-        }),
-      ),
-    }),
-  ]),
+  replay: ReplaySchema,
   superseded_by: Schema.optional(Schema.String),
   at: Schema.String,
 })
@@ -78,6 +112,18 @@ export function isReportableFinding(finding: FindingRecord): boolean {
   return finding.replay.exemption !== undefined && finding.replay.exemption.rationale.trim().length > 0
 }
 
+export function isVerifiedResolution(finding: FindingRecord): boolean {
+  const retest = finding.retests?.at(-1)
+  return (
+    finding.status === "resolved" &&
+    retest?.outcome === "resolved" &&
+    Boolean(retest.reviewer.trim() && retest.note.trim()) &&
+    JSON.stringify([...finding.evidence_refs].sort()) === JSON.stringify([...retest.evidence_refs].sort()) &&
+    JSON.stringify(finding.replay) === JSON.stringify(retest.replay) &&
+    isReportableFinding({ ...finding, status: "verified", evidence_refs: retest.evidence_refs, replay: retest.replay })
+  )
+}
+
 export function bucketFindings(findings: FindingRecord[]): {
   reportable: FindingRecord[]
   unverified: FindingRecord[]
@@ -86,6 +132,7 @@ export function bucketFindings(findings: FindingRecord[]): {
   rejected: FindingRecord[]
   stale: FindingRecord[]
   superseded: FindingRecord[]
+  resolved: FindingRecord[]
 } {
   const buckets = {
     reportable: [] as FindingRecord[],
@@ -95,6 +142,7 @@ export function bucketFindings(findings: FindingRecord[]): {
     rejected: [] as FindingRecord[],
     stale: [] as FindingRecord[],
     superseded: [] as FindingRecord[],
+    resolved: [] as FindingRecord[],
   }
   for (const finding of findings) {
     if (finding.superseded_by) {
@@ -103,6 +151,10 @@ export function bucketFindings(findings: FindingRecord[]): {
     }
     if (isReportableFinding(finding)) {
       buckets.reportable.push(finding)
+      continue
+    }
+    if (isVerifiedResolution(finding)) {
+      buckets.resolved.push(finding)
       continue
     }
     if (finding.status === "rejected") {
@@ -152,6 +204,7 @@ export function formatBucketSummary(records: FindingRecord[]): string {
   lines.push(`rejected: ${buckets.rejected.length}`)
   lines.push(`stale: ${buckets.stale.length}`)
   lines.push(`superseded: ${buckets.superseded.length}`)
+  lines.push(`resolved with retest: ${buckets.resolved.length}`)
   if (buckets.noReplay.length > 0) {
     lines.push("")
     lines.push(

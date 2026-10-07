@@ -21,14 +21,7 @@ export type Section = (typeof SECTIONS)[number]
 export type Format = "markdown" | "json" | "html"
 const severityOrder = ["critical", "high", "medium", "low", "info"]
 
-export async function build(input: EngagementSchema.State, selected: readonly Section[] = SECTIONS) {
-  const state = (() => {
-    try {
-      return Schema.decodeUnknownSync(EngagementSchema.State)(input)
-    } catch {
-      throw new Error("Engagement report input is malformed; sensitive state is not displayed")
-    }
-  })()
+function redactor(state: EngagementSchema.State) {
   const secrets = Object.values(state.credentials)
     .flatMap((credential) => {
       if (!credential.value) return []
@@ -41,13 +34,38 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
     .concat([...state.flags])
     .filter(Boolean)
     .sort((a, b) => b.length - a.length)
-  const clean = (text: string) => secrets.reduce((value, secret) => value.split(secret).join("[REDACTED]"), text)
-  const records = FindingLifecycle.normalizeFindingRecords(await FindingStore.load(state.name))
+  return (text: string) => secrets.reduce((value, secret) => value.split(secret).join("[REDACTED]"), text)
+}
+
+export function redact(state: EngagementSchema.State, input: unknown): unknown {
+  const clean = redactor(state)
+  function visit(value: unknown): unknown {
+    if (typeof value === "string") return clean(value)
+    if (Array.isArray(value)) return value.map(visit)
+    if (value && typeof value === "object")
+      return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item)]))
+    return value
+  }
+  return visit(input)
+}
+
+export async function build(input: EngagementSchema.State, selected: readonly Section[] = SECTIONS) {
+  const state = (() => {
+    try {
+      return Schema.decodeUnknownSync(EngagementSchema.State)(input)
+    } catch {
+      throw new Error("Engagement report input is malformed; sensitive state is not displayed")
+    }
+  })()
+  const clean = redactor(state)
+  const ledger = await FindingStore.load(state.name)
+  const records = FindingLifecycle.normalizeFindingRecords(ledger)
   await Evidence.list(state.name)
   const findings = await Promise.all(
     records.map(async (record) => {
       const reasons: string[] = []
-      if (!FindingLifecycle.isReportableFinding(record)) {
+      const resolution = FindingLifecycle.isVerifiedResolution(record)
+      if (!FindingLifecycle.isReportableFinding(record) && !resolution) {
         if (record.superseded_by) reasons.push("Superseded finding")
         if (record.status !== "verified") reasons.push(`Finding status: ${record.status}`)
         if (!record.evidence_refs.length) reasons.push("No evidence references")
@@ -58,8 +76,17 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
         const scope = ScopeMatcher.checkScope(record.target, state.scope)
         if (!scope.inScope) reasons.push("Target is outside the current authorized scope")
       } else reasons.push("Affected target is not recorded")
+      const revisions = ledger.filter((revision) => revision.id === record.id)
+      const refs = [
+        ...new Set(
+          revisions.flatMap((revision) => [
+            ...revision.evidence_refs,
+            ...(revision.retests ?? []).flatMap((retest) => retest.evidence_refs),
+          ]),
+        ),
+      ]
       const evidence = await Promise.all(
-        record.evidence_refs.map(async (ref) => {
+        refs.map(async (ref) => {
           try {
             const stored = await Evidence.get(state.name, ref)
             if (!stored) {
@@ -80,6 +107,26 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
         severity: severityOrder.includes(record.severity ?? "") ? record.severity! : "info",
         status: record.status,
         detail: clean(record.detail ?? ""),
+        owner: clean(record.owner?.trim() || "Unassigned"),
+        reviewer: clean(record.reviewer?.trim() || "Not recorded"),
+        impact: clean(record.impact?.trim() || "Not recorded"),
+        remediation: clean(record.remediation?.trim() || "Not recorded"),
+        reproduction_steps: (record.reproduction_steps ?? []).map(clean),
+        review_note: clean(record.review_note ?? ""),
+        retests: (record.retests ?? []).map((retest) => ({
+          outcome: retest.outcome,
+          reviewer: clean(retest.reviewer),
+          note: clean(retest.note),
+          at: clean(retest.at),
+          evidence_refs: retest.evidence_refs.map(clean),
+        })),
+        history: revisions.map((revision) => ({
+          status: revision.status,
+          at: clean(revision.at),
+          reviewer: clean(revision.reviewer ?? "Not recorded"),
+          note: clean(revision.review_note ?? ""),
+          evidence_refs: revision.evidence_refs.map(clean),
+        })),
         replay: record.replay.present
           ? { present: true }
           : {
@@ -90,7 +137,8 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
             },
         evidence: evidence.filter((entry) => entry !== undefined),
         reasons: [...new Set(reasons)],
-        reportable: reasons.length === 0,
+        reportable: record.status === "verified" && reasons.length === 0,
+        resolved: resolution && reasons.length === 0,
         recorded_at: clean(record.at),
         superseded_by: record.superseded_by ? clean(record.superseded_by) : undefined,
       }
@@ -102,7 +150,8 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
   const excluded = findings.filter(
     (finding) => finding.superseded_by || finding.status === "rejected" || finding.status === "stale",
   )
-  const pending = findings.filter((finding) => !finding.reportable && !excluded.includes(finding))
+  const resolved = findings.filter((finding) => finding.resolved)
+  const pending = findings.filter((finding) => !finding.reportable && !finding.resolved && !excluded.includes(finding))
   const linked = new Set(records.map((record) => record.id))
   const observations = Object.entries(state.hosts).flatMap(([target, host]) =>
     host.vulns.flatMap((vuln) => {
@@ -129,6 +178,7 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
   )
   const summary = {
     reportable_findings: verified.length,
+    resolved_findings: resolved.length,
     awaiting_verification: pending.length + observations.length,
     excluded_findings:
       excluded.length +
@@ -160,7 +210,7 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
       discovered_not_authorized: (state.scope.discovered_targets ?? []).map(clean),
       notes: clean(state.scope.notes ?? ""),
     },
-    findings: { verified, verification_queue: [...pending, ...observations], excluded },
+    findings: { verified, resolved, verification_queue: [...pending, ...observations], excluded },
     attack_path: state.attack_path.map((step) => ({
       timestamp: clean(step.timestamp),
       source: clean(step.source),
@@ -181,11 +231,17 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
     recommendations: verified.map((finding) => ({
       finding_id: finding.id,
       priority: finding.severity,
-      action: `Remediate and retest ${finding.title} on ${finding.target}; retain the original evidence and record the new result.`,
+      owner: finding.owner,
+      action:
+        finding.remediation !== "Not recorded"
+          ? finding.remediation
+          : `Record remediation guidance and retest ${finding.title} on ${finding.target}; retain the original evidence and record the new result.`,
     })),
   }
   const evidence = [
-    ...new Map(verified.flatMap((finding) => finding.evidence).map((entry) => [entry.sha256, entry])).values(),
+    ...new Map(
+      [...verified, ...resolved].flatMap((finding) => finding.evidence).map((entry) => [entry.sha256, entry]),
+    ).values(),
   ]
   return {
     format_version: 1,
@@ -199,6 +255,8 @@ export async function build(input: EngagementSchema.State, selected: readonly Se
       human_review_required: true,
       verification:
         "Operator-recorded verification; evidence bytes checked against SHA-256. Replay material is recorded, not independently re-executed by this exporter.",
+      retest:
+        "Operator-recorded retests are required for resolution. Reviewer labels and outcomes are recorded assertions; absence from a scan never closes a finding.",
       coverage: "A snapshot of recorded findings, not proof that every authorized asset or vulnerability was tested.",
       redaction:
         "Credential values and known credentials in text are redacted; inspect other sensitive information before sharing. Raw evidence blobs are not embedded.",
@@ -236,6 +294,7 @@ export function renderMarkdown(data: Data) {
       "## Executive summary",
       "",
       `- Verified, reportable findings: **${data.summary.reportable_findings}**`,
+      `- Resolved with retest: **${data.summary.resolved_findings}**`,
       `- Awaiting verification: **${data.summary.awaiting_verification}**`,
       `- Excluded / rejected: **${data.summary.excluded_findings}**`,
       `- Hosts observed: **${data.summary.hosts_observed}**`,
@@ -260,9 +319,9 @@ export function renderMarkdown(data: Data) {
     )
   }
   if (sections.findings) {
-    out.push("## Verified findings", "")
+    out.push("## Reviewed findings · verified and resolved", "")
     if (!sections.findings.verified.length) out.push("No findings currently meet the reporting gate.", "")
-    for (const finding of sections.findings.verified) {
+    for (const finding of [...sections.findings.verified, ...sections.findings.resolved]) {
       out.push(
         `### ${markdown(finding.title)}`,
         "",
@@ -270,8 +329,22 @@ export function renderMarkdown(data: Data) {
         `- Target: ${markdown(finding.target)}`,
         `- Severity: ${finding.severity}`,
         `- Verification: ${finding.status}`,
+        `- Owner: ${markdown(finding.owner)}`,
+        `- Reviewer label: ${markdown(finding.reviewer)}`,
         "",
         markdown(finding.detail),
+        "",
+        `**Impact:** ${markdown(finding.impact)}`,
+        `**Remediation:** ${markdown(finding.remediation)}`,
+        "",
+        "Reproduction steps:",
+        ...finding.reproduction_steps.map((step, index) => `${index + 1}. ${markdown(step)}`),
+        "",
+        "Retest history:",
+        ...finding.retests.map(
+          (retest) =>
+            `- ${markdown(retest.at)} · ${retest.outcome} · ${markdown(retest.reviewer)}: ${markdown(retest.note)} · ${retest.evidence_refs.map(markdown).join(", ")}`,
+        ),
         "",
         finding.replay.present
           ? "Replay material recorded."
@@ -295,7 +368,7 @@ export function renderMarkdown(data: Data) {
         "",
       )
     out.push(
-      `Excluded ledger findings: ${sections.findings.excluded.length}. Rejected and stale findings are not remediation recommendations.`,
+      `Resolved with retest: ${sections.findings.resolved.length}. Excluded ledger findings: ${sections.findings.excluded.length}. Rejected and stale findings are not remediation recommendations.`,
       "",
     )
   }
@@ -345,7 +418,17 @@ export function renderMarkdown(data: Data) {
     )
     if (!sections.recommendations.length) out.push("Validate queued observations before making remediation claims.", "")
   }
-  out.push("## Report policy", "", data.policy.verification, "", data.policy.coverage, "", data.policy.redaction)
+  out.push(
+    "## Report policy",
+    "",
+    data.policy.verification,
+    "",
+    data.policy.retest,
+    "",
+    data.policy.coverage,
+    "",
+    data.policy.redaction,
+  )
   return out.join("\n")
 }
 
@@ -374,17 +457,26 @@ export function renderHtml(data: Data) {
     )
   if (sections.findings) {
     body.push(
-      `<section>${heading("Verified findings")}${sections.findings.verified.length ? "" : '<p class="empty">No finding currently meets the reporting gate.</p>'}`,
+      `<section>${heading("Reviewed findings · verified and resolved")}${sections.findings.verified.length || sections.findings.resolved.length ? "" : '<p class="empty">No finding currently meets the reporting gate.</p>'}`,
     )
-    for (const finding of sections.findings.verified)
+    for (const finding of [...sections.findings.verified, ...sections.findings.resolved])
       body.push(
-        `<article class="finding"><div class="finding-meta"><span class="badge ${finding.severity}">${escape(finding.severity)}</span><code>${escape(finding.id)}</code></div><h3>${escape(finding.title)}</h3><p class="target">${escape(finding.target)}</p><p>${escape(finding.detail)}</p><p class="note">${finding.replay.present ? "Replay material recorded; operator review required." : `Replay exemption: ${escape(finding.replay.exemption?.rationale ?? "")}`}</p>${table(
+        `<article class="finding"><div class="finding-meta"><span class="badge ${finding.status === "resolved" ? "resolved" : finding.severity}">${escape(finding.status === "resolved" ? "resolved" : finding.severity)}</span><code>${escape(finding.id)}</code></div><h3>${escape(finding.title)}</h3><p class="target">${escape(finding.target)}</p><p>${escape(finding.detail)}</p>${table(["Owner", "Reviewer label"], [[finding.owner, finding.reviewer]])}<h4>Impact</h4><p>${escape(finding.impact)}</p><h4>Remediation</h4><p>${escape(finding.remediation)}</p><h4>Reproduction steps</h4><ol>${finding.reproduction_steps.map((step) => `<li>${escape(step)}</li>`).join("")}</ol><h4>Retest history</h4>${table(
+          ["Time", "Outcome", "Reviewer", "Note", "Evidence SHA-256"],
+          finding.retests.map((retest) => [
+            retest.at,
+            retest.outcome,
+            retest.reviewer,
+            retest.note,
+            retest.evidence_refs.join("\n"),
+          ]),
+        )}<p class="note">${finding.replay.present ? "Replay material recorded; operator review required." : `Replay exemption: ${escape(finding.replay.exemption?.rationale ?? "")}`}</p>${table(
           ["SHA-256", "Bytes", "Evidence label"],
           finding.evidence.map((entry) => [entry.sha256, String(entry.size), entry.label]),
         )}</article>`,
       )
     body.push(
-      `</section><section>${heading("Verification queue")}<p class="note">These observations are not confirmed vulnerabilities.</p>${table(
+      `</section><section>${heading("Verification queue")}<p class="note">These observations are not confirmed vulnerabilities. Resolved with retest: ${sections.findings.resolved.length}.</p>${table(
         ["Observation", "Target", "Reason"],
         sections.findings.verification_queue.map((finding) => [
           finding.title,
@@ -431,8 +523,8 @@ export function renderHtml(data: Data) {
       `<section>${heading("Remediation and retest")}<ul>${sections.recommendations.map((item) => `<li><strong>${escape(item.finding_id)}</strong> · ${escape(item.action)}</li>`).join("")}</ul>${sections.recommendations.length ? "" : "<p>Validate queued observations before making remediation claims.</p>"}</section>`,
     )
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'none'; base-uri 'none'; form-action 'none'"><title>${escape(data.engagement.name)} · KevlarRedOps report</title><style>
-:root{color-scheme:light;--ink:#1c2927;--paper:#f6f4ee;--line:#d4d9d1;--accent:#b7472e}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:56px 36px}header{border-top:6px solid var(--ink);border-bottom:1px solid var(--line);padding:26px 0 32px}.eyebrow{font:600 12px/1.4 monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}h1{font:500 clamp(32px,5vw,60px)/1.12 Georgia,serif;overflow-wrap:anywhere;margin:18px 0}h2{font:500 30px/1.25 Georgia,serif;margin:0 0 24px}h3{font:600 22px/1.35 system-ui;margin:12px 0}section{padding:36px 0;border-bottom:1px solid var(--line)}.subtitle,.note{color:#54645c;font-size:14px}.review{border-left:3px solid var(--accent);padding:12px 18px;background:#efe6da;margin-top:22px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}.metrics div{background:var(--paper);padding:22px}.metrics strong{display:block;font:500 48px/1.1 Georgia,serif}.metrics span{font-size:13px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:12px 10px;background:#e8ece5}td{padding:14px 10px;border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;vertical-align:top}code{font:12px monospace;overflow-wrap:anywhere}.finding{padding:24px;border:1px solid var(--line);margin:18px 0;background:#fffdf8;break-inside:avoid}.finding-meta{display:flex;align-items:center;gap:14px}.badge{font-size:11px;font-weight:700;text-transform:uppercase;background:#e6ebe2;padding:4px 10px}.critical,.high{background:#f6d9cf;color:#822b20}.medium{background:#f0e2bf;color:#6b5416}.target{font:13px monospace;color:#54645c}.empty{border:1px dashed var(--line);padding:18px}footer{font-size:12px;color:#54645c;margin-top:28px}p{overflow-wrap:anywhere;white-space:pre-wrap}@media(max-width:700px){main{padding:24px 18px}.metrics{grid-template-columns:repeat(2,1fr)}.metrics div{padding:16px}.finding{padding:16px}}@media print{body{background:white;font-size:11px}main{padding:0;max-width:none}header{padding:12px 0}h1{font-size:36px}h2{font-size:24px}section{padding:20px 0}.metrics strong{font-size:32px}table{font-size:11px}thead{display:table-header-group}.table-wrap{overflow:visible}.finding{background:white}}
-</style></head><body><main><header><div class="eyebrow">KevlarRedOps / assessment report</div><h1>${escape(data.engagement.name)}</h1><p class="subtitle">Snapshot ${escape(data.engagement.snapshot_at)} · ${escape(data.summary.phase)} · ${escape(data.summary.mode)}</p><div class="review"><strong>Operator review required.</strong> Verified entries have stored evidence with matching hashes. Replay material is recorded; this exporter does not re-execute it.</div></header>${body.join("")}<footer><strong>Report policy</strong><p>${escape(data.policy.coverage)}</p><p>${escape(data.policy.redaction)}</p></footer></main></body></html>`
+:root{color-scheme:light;--ink:#1c2927;--paper:#f6f4ee;--line:#d4d9d1;--accent:#b7472e}*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.65 system-ui,sans-serif}main{max-width:1100px;margin:auto;padding:56px 36px}header{border-top:6px solid var(--ink);border-bottom:1px solid var(--line);padding:26px 0 32px}.eyebrow{font:600 12px/1.4 monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--accent)}h1{font:500 clamp(32px,5vw,60px)/1.12 Georgia,serif;overflow-wrap:anywhere;margin:18px 0}h2{font:500 30px/1.25 Georgia,serif;margin:0 0 24px}h3{font:600 22px/1.35 system-ui;margin:12px 0}section{padding:36px 0;border-bottom:1px solid var(--line)}.subtitle,.note{color:#54645c;font-size:14px}.review{border-left:3px solid var(--accent);padding:12px 18px;background:#efe6da;margin-top:22px}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}.metrics div{background:var(--paper);padding:22px}.metrics strong{display:block;font:500 48px/1.1 Georgia,serif}.metrics span{font-size:13px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;text-align:left;font-size:14px}th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;padding:12px 10px;background:#e8ece5}td{padding:14px 10px;border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere;vertical-align:top}code{font:12px monospace;overflow-wrap:anywhere}.finding{padding:24px;border:1px solid var(--line);margin:18px 0;background:#fffdf8;break-inside:avoid}.finding-meta{display:flex;align-items:center;gap:14px}.badge{font-size:11px;font-weight:700;text-transform:uppercase;background:#e6ebe2;padding:4px 10px}.resolved{background:#d6e8d8;color:#254c35}.critical,.high{background:#f6d9cf;color:#822b20}.medium{background:#f0e2bf;color:#6b5416}.target{font:13px monospace;color:#54645c}.empty{border:1px dashed var(--line);padding:18px}footer{font-size:12px;color:#54645c;margin-top:28px}p{overflow-wrap:anywhere;white-space:pre-wrap}@media(max-width:700px){main{padding:24px 18px}.metrics{grid-template-columns:repeat(2,1fr)}.metrics div{padding:16px}.finding{padding:16px}}@media print{body{background:white;font-size:11px}main{padding:0;max-width:none}header{padding:12px 0}h1{font-size:36px}h2{font-size:24px}section{padding:20px 0}.metrics strong{font-size:32px}table{font-size:11px}thead{display:table-header-group}.table-wrap{overflow:visible}.finding{background:white}}
+</style></head><body><main><header><div class="eyebrow">KevlarRedOps / assessment report</div><h1>${escape(data.engagement.name)}</h1><p class="subtitle">Snapshot ${escape(data.engagement.snapshot_at)} · ${escape(data.summary.phase)} · ${escape(data.summary.mode)}</p><div class="review"><strong>Operator review required.</strong> Verified entries have stored evidence with matching hashes. Replay material is recorded; this exporter does not re-execute it.</div></header>${body.join("")}<footer><strong>Report policy</strong><p>${escape(data.policy.retest)}</p><p>${escape(data.policy.coverage)}</p><p>${escape(data.policy.redaction)}</p></footer></main></body></html>`
 }
 
 export function render(data: Data, format: Format) {

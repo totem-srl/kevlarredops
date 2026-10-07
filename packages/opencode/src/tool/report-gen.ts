@@ -40,6 +40,7 @@ export const ReportGenTool = Tool.define(
             format,
             sections,
             reportable: data.summary.reportable_findings,
+            resolved: data.summary.resolved_findings,
             awaiting_verification: data.summary.awaiting_verification,
             redacted: true,
             snapshot_at: data.engagement.snapshot_at,
@@ -57,7 +58,7 @@ export const ReportGenTool = Tool.define(
           return {
             title: `report -> ${destination}`,
             metadata: { ...metadata, output_path: destination },
-            output: `${format.toUpperCase()} report written to ${destination} (${Buffer.byteLength(output)} bytes).\nReportable: ${metadata.reportable}; awaiting verification: ${metadata.awaiting_verification}.\nSHA-256: ${sha256}\nOperator review required before sharing.`,
+            output: `${format.toUpperCase()} report written to ${destination} (${Buffer.byteLength(output)} bytes).\nReportable: ${metadata.reportable}; resolved with retest: ${metadata.resolved}; awaiting verification: ${metadata.awaiting_verification}.\nSHA-256: ${sha256}\nOperator review required before sharing.`,
           }
         }).pipe(Effect.orDie),
     }
