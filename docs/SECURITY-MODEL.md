@@ -51,6 +51,32 @@ Implementation and verification:
 - [Network regression tests](../packages/opencode/test/tool/network-scope.test.ts): real
   loopback servers count requests, connections, and datagrams, including positive cases.
 
+## Scanner request boundaries
+
+The legacy `appsec_probe`, `bounty_hunt`, and `recon_pipeline` tools deny an
+out-of-scope initial target before permission approval, then check the current
+engagement again after approval. Empty scope and exclusions apply in `free` mode.
+Recon planning remains available because it does not execute network operations.
+
+Their HTTP operations use a shared request boundary which rereads the active
+engagement for every request and always uses manual redirects. AppSec checks
+discovered form actions before sending a probe and reports out-of-scope probes
+as skipped. Bounty's JavaScript, directory-fuzzing and OpenAPI helpers receive the
+same request boundary. Recon checks discovered hosts before HTTP/CNAME probes and
+checks the root target again before the optional port-scan process starts.
+Discovery output must match the root domain or a dot-separated subdomain.
+
+The [scanner scope regressions](../packages/opencode/test/tool/scanner-scope.test.ts)
+exercise denied initial targets, scope changes during approval and between page
+fetch and probing, form actions outside scope, script/OpenAPI redirects, authorized
+loopback requests, and planning without authorization. The tests do not run a live
+Recon scan or certify the behavior of external adapter binaries.
+
+Implementation: [shared request boundary](../packages/opencode/src/scanner/scoped-request.ts),
+[AppSec](../packages/opencode/src/tool/appsec-probe.ts),
+[Bounty](../packages/opencode/src/tool/bounty-hunt.ts),
+[Recon](../packages/opencode/src/tool/recon-pipeline.ts).
+
 ## Limits and containment
 
 Command extraction is a heuristic. It recognizes literal IPs and selected hostname patterns,
@@ -59,7 +85,7 @@ of scripts, shell variables, subprocesses, redirects, tunnels, DNS resolution, o
 Some hosts and loopback addresses are ignored by the extractor. An unrecognized destination
 can pass the shell check; a warning is not a denial.
 
-Other specialized legacy network tools have separate scope implementations; some still allow
+Other specialized legacy tools and external adapters have separate scope implementations; some still allow
 mode-dependent overrides. The shell and direct network regression tests do not prove containment of those tools,
 plugins, MCP servers, or delegated agents. Scope state also uses the existing engagement store;
 this change does not establish isolation between concurrent engagements.
@@ -88,6 +114,7 @@ bun typecheck
 cd ../opencode
 bun test test/tool/shell.test.ts
 bun test test/tool/network-scope.test.ts
+bun test test/tool/scanner-scope.test.ts test/scanner.test.ts
 bun test test/config/config.test.ts --test-name-pattern 'global config updates refresh'
 bun typecheck
 ```
@@ -102,7 +129,7 @@ while command approval is pending. Matching tests also cover internal network ho
 public suffixes such as `.zip`, `.mov`, and `.security` while retaining code-token regressions.
 
 CI results, runtime containment, identity verification, and project adoption are separate evidence.
-CI explicitly runs the legacy shell, direct network, and global config cache regressions alongside the core tests and API gates.
+CI explicitly runs the legacy shell, direct network, scanner, and global config cache regressions alongside the core tests and API gates.
 The inherited Turbo task still references the previous `opencode` package name; it does not
 prove that the complete legacy `pentestcode` suite runs. Restoring that full suite is separate
 validation work, and a passing shell regression file is not a full legacy-suite result.

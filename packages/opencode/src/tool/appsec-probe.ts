@@ -4,8 +4,9 @@ import { Observation } from "@pentestcode/core/cyber/observation"
 import { EngagementStore } from "@pentestcode/core/engagement/store"
 import { ScopeMatcher } from "@pentestcode/core/engagement/scope-matcher"
 import { extractForms, extractLinks, type CrawlForm } from "@/scanner/crawl"
+import { ScopedRequest } from "@/scanner/scoped-request"
 import DESCRIPTION from "./appsec-probe.txt"
-import * as Tool from "./tool"
+import { Tool } from "./tool"
 
 const MAX_EVIDENCE_BODY = 64000
 const MARKER = "pentestcode-xss"
@@ -123,10 +124,10 @@ function idorRewrite(route: URL): URL | undefined {
   return undefined
 }
 
-async function sendProbe(req: ProbeRequest, timeoutMs: number): Promise<ProbeResponse> {
+async function sendProbe(req: ProbeRequest, timeoutMs: number, request: ScopedRequest.Request): Promise<ProbeResponse> {
   const started = Date.now()
   try {
-    const response = await fetch(req.url, {
+    const response = await request(req.url, {
       method: req.method,
       headers: {
         "user-agent": "pentestcode-appsec-probe/1.0",
@@ -293,6 +294,7 @@ export const AppsecProbeTool = Tool.define(
   "appsec_probe",
   Effect.gen(function* () {
     const store = yield* EngagementStore.Service
+    const guard = yield* ScopedRequest.make
     return {
       description: DESCRIPTION,
       parameters: Parameters,
@@ -310,15 +312,12 @@ export const AppsecProbeTool = Tool.define(
             }
           }
 
-          const state = yield* store.get()
-          if (state && state.scope.targets.length > 0 && state.mode !== "free") {
-            const check = ScopeMatcher.checkScope(base.hostname, state.scope)
-            if (!check.inScope) {
-              return {
-                title: "appsec_probe · blocked",
-                metadata: { blocked: true },
-                output: `Blocked: ${base.hostname} is outside engagement scope (${check.reason}).`,
-              }
+          const initial = yield* guard.check(base.toString())
+          if (!initial.inScope) {
+            return {
+              title: "appsec_probe · blocked",
+              metadata: { blocked: true },
+              output: `Blocked: ${base.hostname} is outside engagement scope (${initial.reason}).`,
             }
           }
 
@@ -329,6 +328,18 @@ export const AppsecProbeTool = Tool.define(
             metadata: { target: params.target },
           })
 
+          const state = yield* store.get()
+          if (state) {
+            const check = ScopeMatcher.checkScope(base.toString(), state.scope)
+            if (!check.inScope) {
+              return {
+                title: "appsec_probe · blocked",
+                metadata: { blocked: true },
+                output: `Blocked: ${base.hostname} is outside engagement scope (${check.reason}).`,
+              }
+            }
+          }
+
           const timeoutMs = Math.min(Math.max(Math.trunc(params.timeout_ms ?? 15000), 500), 120_000)
           const allChecks: ProbeCheck[] = ["sqli_search", "xss_search", "broken_auth_jwt", "idor_basket", "weak_cors"]
           const wanted = new Set<ProbeCheck>(params.checks ?? allChecks)
@@ -337,9 +348,8 @@ export const AppsecProbeTool = Tool.define(
           let html = ""
           try {
             const page = yield* Effect.promise(() =>
-              fetch(base.toString(), {
+              guard.request(base.toString(), {
                 headers: { "user-agent": "pentestcode-appsec-probe/1.0" },
-                redirect: "follow",
                 signal: AbortSignal.timeout(timeoutMs),
               }),
             )
@@ -435,7 +445,12 @@ export const AppsecProbeTool = Tool.define(
 
           const responses: ProbeResponse[] = []
           for (const req of plan) {
-            responses.push(yield* Effect.promise(() => sendProbe(req, timeoutMs)))
+            const check = yield* guard.check(req.url)
+            if (!check.inScope) {
+              skipped.push(`${req.check}: ${req.url} is outside engagement scope (${check.reason}).`)
+              continue
+            }
+            responses.push(yield* Effect.promise(() => sendProbe(req, timeoutMs, guard.request)))
           }
           const candidates = analyze(responses, evilOrigin)
 
@@ -477,7 +492,7 @@ export const AppsecProbeTool = Tool.define(
           return {
             title: `appsec_probe · ${candidates.length} candidate(s) · ${base.host}`,
             metadata: {
-              checks_run: plan.map((p) => p.check),
+              checks_run: responses.map((p) => p.check),
               skipped: skipped.length,
               candidates: candidates.length,
               high: candidates.filter((c) => c.severity === "high").length,

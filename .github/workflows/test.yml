@@ -79,7 +79,7 @@ jobs:
 
       - name: Run active network scope regressions
         working-directory: packages/opencode
-        run: bun test test/tool/network-scope.test.ts --timeout 30000 --only-failures
+        run: bun test test/tool/network-scope.test.ts test/tool/scanner-scope.test.ts test/scanner.test.ts --timeout 30000 --only-failures
 
       - name: Check generated client
         if: runner.os == 'Linux'
@@ -88,6 +88,7 @@ jobs:
 
       - name: Run HttpApi exerciser gates
         if: runner.os == 'Linux'
+        timeout-minutes: 10
         working-directory: packages/opencode
         run: bun run test:httpapi
 
