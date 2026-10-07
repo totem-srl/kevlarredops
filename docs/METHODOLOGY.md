@@ -83,15 +83,20 @@ the engagement is durable, agents are disposable.
 ## Evidence chain
 
 ```
-tool output (raw)  →  parsed artifact (nmap_parse etc.)  →  Vulnerability.evidence[]
-                   →  deriveConfidence()                 →  suspected | confirmed
-exploit succeeds   →  AttackStep w/ proof                →  exploited (reportable)
-critic subagent    →  false_positive filter              →  removed before report
+tool output (raw)  →  parsed observation                  →  verification queue
+operator review   →  finding promotion                   →  lifecycle record
+stored evidence   →  SHA-256 integrity + authorized scope →  report eligibility
+replay / exemption + verified status                     →  verified report section
+rejected / stale / superseded                            →  excluded from remediation
 ```
 
-The critic agent challenges every confirmed finding pre-report. Report generation
-(`report_gen`) refuses unproven claims — severity ordering, executive summary,
-recommendations all read directly from EngagementStore.
+The critic agent is intended to challenge findings before promotion. `report_gen` and
+the offline `report` CLI share one snapshot builder: severity counts and recommendations
+come only from eligible lifecycle records with resolving, intact evidence and an authorized
+target. Scanner observations, including legacy `confirmed`/`exploited` entries without a
+linked lifecycle record, remain in a separate verification queue. The exporter checks
+recorded proof; it does not execute replay or independently establish vulnerability truth.
+See [reporting](REPORTING.md) for the exact gate and review workflow.
 
 ## Worked example — one finding end to end
 

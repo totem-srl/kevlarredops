@@ -3,8 +3,10 @@ Generate the engagement report from current state via report_gen. The builder is
 When to call: at the reporting phase, when the operator requests a report (/report), or when an objective completes and its evidence should be captured.
 
 Parameters:
-- format: "markdown" (default, for delivery) or "json" (for downstream tooling).
-- sections: subset of executive_summary, scope, findings, attack_path, credentials, recommendations. Default: all.
+- format: "markdown" (default), "json" (versioned structured report, not a state backup), or "html" (offline, printable). All use the same reporting model.
+- sections: subset of executive_summary, objectives, scope, findings, attack_path, credentials, recommendations. Applies to every format. Default: all.
 - output_path: write to file instead of returning inline.
 
-Evidence rule: only proven findings appear as confirmed/exploited in the report. If a finding is still suspected, do not force it into the report — prove it first or record it as a note. Findings without reproduction steps do not ship.
+Evidence rule: reportable findings come from the finding lifecycle, require verified status, an authorized recorded target, stored evidence whose bytes match SHA-256, and replay material or a reasoned exemption. Scanner observations remain in a verification queue. Rejected and stale findings do not become remediation recommendations. Missing, changed or ambiguous evidence blocks reportability; corrupt ledgers fail visibly.
+
+Credential values and known credentials appearing in text are redacted. Raw evidence is not embedded. Every export includes review/coverage limits and a file digest in tool metadata. A matching hash verifies bytes, not the vulnerability itself; this exporter does not independently rerun replay material. Inspect other sensitive data before sharing.

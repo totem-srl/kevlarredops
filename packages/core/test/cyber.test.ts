@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import os from "node:os"
-import path from "node:path"
 import fs from "node:fs/promises"
-
-const TEST_HOME = path.join(os.tmpdir(), `pentestcode-cyber-test-${Date.now()}`)
-process.env.HOME = TEST_HOME
 
 const { evaluate, checkStrictOpsec, evaluateStrict, defaultBoundary } = await import("@pentestcode/core/cyber/boundary")
 const { Evidence } = await import("@pentestcode/core/cyber/evidence")
@@ -16,7 +11,12 @@ import {
   normalizeFindingRecords,
   type FindingRecord,
 } from "@pentestcode/core/cyber/finding-lifecycle"
-import { compareVersion, evaluateNvdApplicability, inRange, type NvdVersionRange } from "@pentestcode/core/cyber/nvd-match"
+import {
+  compareVersion,
+  evaluateNvdApplicability,
+  inRange,
+  type NvdVersionRange,
+} from "@pentestcode/core/cyber/nvd-match"
 import { buildVulnIntelCard } from "@pentestcode/core/cyber/knowledge"
 import { parseComponent } from "@pentestcode/core/cyber/component"
 import { Methodology } from "@pentestcode/core/cyber/methodology"
@@ -24,7 +24,11 @@ import { getPlay, listPlays } from "@pentestcode/core/cyber/play/registry"
 import { formatPlayResult, PlayArgError, runPlay } from "@pentestcode/core/cyber/play/runner"
 
 describe("boundary", () => {
-  const boundary = { default: "ask" as const, in_scope: ["*.example.com", "10.0.0.0/*"], out_of_scope: ["admin.example.com"] }
+  const boundary = {
+    default: "ask" as const,
+    in_scope: ["*.example.com", "10.0.0.0/*"],
+    out_of_scope: ["admin.example.com"],
+  }
 
   test("in-scope wildcard host allows", () => {
     const decision = evaluate(boundary, "https://api.example.com/x")
@@ -58,6 +62,7 @@ describe("finding lifecycle", () => {
     id: over.id ?? "f1",
     title: "t",
     status: "candidate",
+    target: "127.0.0.1",
     evidence_refs: [],
     replay: { present: false },
     at: "2026-01-01T00:00:00Z",
@@ -66,14 +71,21 @@ describe("finding lifecycle", () => {
 
   test("reportable requires verified + evidence + replay or reasoned exemption", () => {
     expect(isReportableFinding(record({ status: "candidate", replay: { present: true } }))).toBe(false)
-    expect(isReportableFinding(record({ status: "verified", evidence_refs: ["sha"], replay: { present: false } }))).toBe(false)
-    expect(isReportableFinding(record({ status: "verified", evidence_refs: ["sha"], replay: { present: true } }))).toBe(true)
+    expect(
+      isReportableFinding(record({ status: "verified", evidence_refs: ["sha"], replay: { present: false } })),
+    ).toBe(false)
+    expect(isReportableFinding(record({ status: "verified", evidence_refs: ["sha"], replay: { present: true } }))).toBe(
+      true,
+    )
     expect(
       isReportableFinding(
         record({
           status: "verified",
           evidence_refs: ["sha"],
-          replay: { present: false, exemption: { category: "destructive_target", rationale: "would brick the device" } },
+          replay: {
+            present: false,
+            exemption: { category: "destructive_target", rationale: "would brick the device" },
+          },
         }),
       ),
     ).toBe(true)
@@ -229,7 +241,9 @@ describe("play system", () => {
   test("steps requiring missing capabilities are skipped as required", () => {
     const result = runPlay({
       id: getPlay("network-surface")?.id ?? "network-surface",
-      args: Object.fromEntries((getPlay("network-surface")?.args ?? []).filter((a) => a.required).map((a) => [a.name, "127.0.0.1"])),
+      args: Object.fromEntries(
+        (getPlay("network-surface")?.args ?? []).filter((a) => a.required).map((a) => [a.name, "127.0.0.1"]),
+      ),
       environment: { binaries: new Set<string>(), runtimes: {} },
     })
     const requiredSkips = result.skipped.filter((entry) => entry.reason.includes("required"))
@@ -240,11 +254,26 @@ describe("play system", () => {
 
 describe("evidence store (isolated HOME)", () => {
   test("put dedupes by content and get resolves sha/prefix/label", async () => {
-    const first = await Evidence.put({ engagementName: "cybertest", content: "payload-one", label: "probe output", source: "test" })
-    const dupe = await Evidence.put({ engagementName: "cybertest", content: "payload-one", label: "same bytes", source: "test" })
+    const first = await Evidence.put({
+      engagementName: "cybertest",
+      content: "payload-one",
+      label: "probe output",
+      source: "test",
+    })
+    const dupe = await Evidence.put({
+      engagementName: "cybertest",
+      content: "payload-one",
+      label: "same bytes",
+      source: "test",
+    })
     expect(first.sha256).toBe(dupe.sha256)
 
-    const second = await Evidence.put({ engagementName: "cybertest", content: JSON.stringify({ k: 2 }), mime: "application/json", label: "json blob" })
+    const second = await Evidence.put({
+      engagementName: "cybertest",
+      content: JSON.stringify({ k: 2 }),
+      mime: "application/json",
+      label: "json blob",
+    })
     const listed = await Evidence.list("cybertest")
     expect(listed.map((e) => e.sha256)).toContain(second.sha256)
 
@@ -260,7 +289,13 @@ describe("evidence store (isolated HOME)", () => {
 
 describe("observation store (isolated HOME)", () => {
   test("add/update/link/project round-trips", async () => {
-    const obs = await Observation.add({ engagementName: "obs-test", subtype: "risk", title: "open redirect", severity: "medium", tags: ["web"] })
+    const obs = await Observation.add({
+      engagementName: "obs-test",
+      subtype: "risk",
+      title: "open redirect",
+      severity: "medium",
+      tags: ["web"],
+    })
     expect(obs.status).toBe("open")
 
     const updated = await Observation.update("obs-test", obs.id, { status: "confirmed", severity: "high" })

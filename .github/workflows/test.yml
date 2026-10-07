@@ -91,6 +91,17 @@ jobs:
         working-directory: packages/opencode
         run: bun test test/tool/network-scope.test.ts test/tool/scanner-scope.test.ts test/scanner.test.ts --timeout 30000 --only-failures
 
+      - name: Typecheck core and CLI
+        timeout-minutes: 10
+        run: |
+          bun --cwd packages/core typecheck
+          bun --cwd packages/opencode typecheck
+
+      - name: Run trusted report and local preflight regressions
+        timeout-minutes: 3
+        working-directory: packages/opencode
+        run: bun test test/tool/trusted-reports.test.ts --timeout 30000 --only-failures
+
       - name: Check generated client
         if: runner.os == 'Linux'
         working-directory: packages/client
