@@ -1,8 +1,10 @@
-# PentestCode
+# KevlarRedOps
 
-<p align="center">
-  <img src="https://github.com/s0ld13rr/pentestcode/raw/main/.github/logo.png" alt="PentestCode" width="480" />
-</p>
+KevlarRedOps is the Totem-maintained derivative of [PentestCode](https://github.com/s0ld13rr/pentestcode),
+which derives from [OpenCode](https://github.com/anomalyco/opencode). The CLI command remains `pentestcode`.
+This repository's owner and security maintainer is [@naicud](https://github.com/naicud);
+see [MAINTAINERS.md](MAINTAINERS.md) for responsibilities and [SECURITY.md](SECURITY.md) for private reporting.
+Public adoption evidence is recorded separately in [docs/ADOPTION.md](docs/ADOPTION.md).
 
 <p align="center">
   <strong>AI penetration testing agent in your terminal.</strong><br>
@@ -10,16 +12,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/s0ld13rr/pentestcode/releases/latest"><img src="https://img.shields.io/github/v/release/s0ld13rr/pentestcode?style=flat-square&color=red" alt="Release"></a>
-  <a href="https://github.com/s0ld13rr/pentestcode/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
-  <a href="https://github.com/s0ld13rr/pentestcode"><img src="https://img.shields.io/github/stars/s0ld13rr/pentestcode?style=flat-square" alt="Stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="License"></a>
 </p>
 
 ---
 
-**PentestCode is an autonomous pentesting agent for your terminal.** Point it at a target and it runs the tools, reads the output, updates its picture of the network, and decides what to do next — the way an operator would. A hard fork of [OpenCode](https://github.com/anomalyco/opencode) (MIT), stripped of the code-editing focus and rebuilt for offensive security.
+**KevlarRedOps is an autonomous pentesting agent for your terminal.** Point it at an authorized target and it runs the tools, reads the output, updates its picture of the network, and decides what to do next — the way an operator would. Its PentestCode/OpenCode lineage is distributed under the MIT license.
 
-> **Beta** — it holds up on real engagements and CTFs, but expect rough edges. [File an issue](https://github.com/s0ld13rr/pentestcode/issues) when something breaks; that's what makes it better.
+> **Beta** — expect rough edges. [File an issue](https://github.com/totem-srl/kevlarredops/issues) when something breaks. Use [private vulnerability reporting](https://github.com/totem-srl/kevlarredops/security/advisories/new) for security vulnerabilities.
 
 ## What it does
 
@@ -43,37 +43,18 @@ It's methodical where people get lazy: it sprays every credential against every 
 
 ## Install
 
+Install this repository from a checkout using Git and [Bun](https://bun.sh/):
+
 ```bash
-
-npm install -g pentestcode-ai
-
-# via curl
-curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
+git clone https://github.com/totem-srl/kevlarredops.git
+cd kevlarredops
+bash script/install.sh
 ```
 
-A single self-contained binary — no Bun, Node, or runtime to install. Linux and macOS, x64 and arm64.
-
-<details>
-<summary>Other options</summary>
-
-**Pin version:**
-```bash
-PENTESTCODE_VERSION=0.1.7 curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
-```
-
-**Custom directory:**
-```bash
-PENTESTCODE_INSTALL=/usr/local/bin curl -fsSL https://raw.githubusercontent.com/s0ld13rr/pentestcode/main/install.sh | bash
-```
-
-**From source:**
-```bash
-bun install
-bun run build --single --skip-embed-web-ui
-# binary at packages/opencode/dist/pentestcode-<os>-<arch>/bin/pentestcode
-```
-
-</details>
+The installer builds the CLI when needed and links it into `~/.local/bin`. Add that directory to your `PATH`.
+Set `PENTESTCODE_DEST` to choose another installation directory or `PENTESTCODE_FORCE_BUILD=1` to rebuild.
+The npm package `pentestcode-ai` and the installer in the upstream repository are separate upstream
+distribution paths; they do not identify a KevlarRedOps release or establish adoption of this repository.
 
 ## Quick start
 
@@ -220,6 +201,8 @@ Bug reports from real usage are the most valuable thing you can send. Run Pentes
 
 Feature requests and PRs are welcome too. The codebase is TypeScript on the Effect library — see [CLAUDE.md](CLAUDE.md) for architecture.
 
+For security vulnerabilities, follow [SECURITY.md](SECURITY.md) rather than opening a public issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
@@ -227,5 +210,5 @@ MIT — see [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  Hard fork of <a href="https://github.com/anomalyco/opencode">OpenCode</a> &bull; Built for offensive security &bull; Self-hosted & open source
+  Derived from <a href="https://github.com/s0ld13rr/pentestcode">PentestCode</a> and <a href="https://github.com/anomalyco/opencode">OpenCode</a> &bull; Self-hosted &amp; open source
 </p>

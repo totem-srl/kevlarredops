@@ -1,3 +1,9 @@
-# web + desktop packages
-packages/app/      @Hona @Brendonovich
-packages/desktop/  @Hona @Brendonovich
+# Repository ownership and security review for the Totem-maintained derivative.
+# CODEOWNERS routes review requests; branch protection determines enforcement.
+* @naicud
+
+# Security policy, maintainer identity, and adoption evidence.
+/SECURITY.md @naicud
+/MAINTAINERS.md @naicud
+/docs/ADOPTION.md @naicud
+/.github/ @naicud
