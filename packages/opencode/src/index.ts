@@ -32,6 +32,7 @@ import { PluginCommand } from "./cli/cmd/plug"
 import { Heap } from "./cli/heap"
 import { ReportCommand } from "./cli/cmd/report"
 import { DoctorCommand } from "./cli/cmd/doctor"
+import { FindingsCommand } from "./cli/cmd/findings"
 
 const args = hideBin(process.argv)
 
@@ -107,6 +108,7 @@ const cli = yargs(args)
   .command(DbCommand)
   .command(ReportCommand)
   .command(DoctorCommand)
+  .command(FindingsCommand)
   .fail((msg, err) => {
     if (
       msg?.startsWith("Unknown argument") ||

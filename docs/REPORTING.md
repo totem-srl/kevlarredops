@@ -7,8 +7,12 @@ tokens or asking an agent to rewrite the evidence.
 
 Download and open the [HTML example](examples/owned-lab-report.html) to inspect the
 layout offline. It was produced by the exporter with synthetic, owned loopback data:
-one eligible finding, one pending observation and one excluded false positive. It is
+one eligible finding, one resolved retest, one pending observation and one excluded false positive. It is
 a demonstration, not evidence of a vulnerability in a real target.
+
+Regenerate the synthetic example from `packages/core` with
+`bun script/report-example.ts`. The generator uses the real finding-review workflow
+inside an isolated temporary home and deletes only its fixture data when finished.
 
 ## Review observations before promotion
 
@@ -40,10 +44,19 @@ The evidence label must resolve uniquely to a stored artifact in this engagement
 An exact SHA-256 or an unambiguous prefix of at least eight hexadecimal characters
 also works. Promotion stores canonical hashes and rejects missing, ambiguous or altered
 artifacts. Repeated promotion preserves previous replay when no replacement is supplied.
-Concurrent promotions within one CLI process are serialized per engagement; this is not
-a cross-process database lock. Finding ledger writes use private temporary files and
+Concurrent mutations within one process are serialized per engagement. A cooperative
+`findings.lock` also prevents another CLI process from writing the ledger concurrently;
+the second writer fails with a busy message instead of dropping a revision. Finding
+ledger writes use private temporary files and
 atomic replacement. Unreadable or malformed ledgers fail visibly instead of becoming an
 empty successful report.
+
+The lock contains a token, process ID and acquisition time. Normal failure or interruption
+releases the owned lock. A mutation finishes its finite filesystem commit before honoring
+interruption so that a still-running write cannot overlap the next writer. After a hard
+process kill, inspect `findings.lock`, confirm its owner is no longer running, and remove
+only that stale lock before retrying. There is no automatic expiry or lock stealing.
+This is a local filesystem lock, not a distributed database transaction.
 
 At export, the report checks lifecycle eligibility, current authorized scope, artifact
 presence, byte length and SHA-256 again. A removed artifact, changed bytes or a newly
@@ -54,6 +67,56 @@ not prove that the exporter independently reproduced the vulnerability.
 `finding` with `action: list` uses the same audit and shows blocking reasons, including
 scanner observations awaiting promotion. List eligibility therefore agrees with the report
 for the same state and stored evidence.
+
+## Assign remediation and record a retest
+
+Every finding can carry `owner`, `reviewer`, `impact`, `remediation` and ordered
+`reproduction_steps`. An update appends a revision and leaves verification status intact.
+Reviewer labels are supplied by the operator; they do not establish verified identity.
+The CLI requires a reviewer and a nonempty review note for every mutation. The agent's
+existing promotion/rejection calls remain compatible; its new update/retest calls require
+the same review fields.
+
+```sh
+pentestcode findings lab --action promote --id lab-review-01 --target 127.0.0.1 \
+  --severity medium --title "Owned lab debug exposure" --proof initial-proof.txt \
+  --reviewer operator --note "Reviewed command and captured result"
+pentestcode findings lab --action update --id lab-review-01 --owner platform-team \
+  --impact "Debug configuration exposed" --remediation "Remove the public debug route" \
+  --reproduction "Request the owned debug route" "Check returned configuration" \
+  --reviewer operator --note "Assigned correction"
+pentestcode findings lab --action retest --id lab-review-01 --outcome resolved \
+  --proof retest-proof.txt --reviewer operator --note "Route returns 404 after correction"
+pentestcode findings lab --json
+pentestcode findings lab --action history --id lab-review-01
+```
+
+`--proof` reads a UTF-8 file containing the recorded command and result, limited to
+10 MiB. It imports a private evidence artifact; it does not execute the command. Existing
+artifacts can be selected with `--evidence`; a replay exemption needs both
+`--replay-exemption-category` and `--replay-exemption-rationale`.
+
+A retest needs replay material or a reasoned exemption and at least one distinct artifact
+captured after the previous finding revision. Include the retest timestamp and result in
+the capture; submitting identical bytes or the original proof does not establish a new
+test. Capture timestamps and outcomes are operator records, not independent attestations.
+
+- `resolved` moves the finding to a separate resolved group and removes it from active
+  severity counts and remediation recommendations.
+- `still_vulnerable` preserves or reopens the active verified finding.
+- `inconclusive` moves the finding to the verification queue; it does not claim a fix.
+
+Original revisions and evidence references remain in the ledger. Reports include the
+revision timeline, retest outcomes, reviewers and evidence hashes, and audit all referenced
+historical artifacts as well as the current proof. Missing or altered original proof blocks
+an audited resolution. A bare `resolved` flag without a matching latest retest is not enough.
+Absence from a later scan never closes a finding. IDs remain local to the engagement;
+cross-engagement matching and automatic comparison are not implemented.
+
+`finding` tool actions `update` and `retest` use the same core workflow as the CLI.
+History output redacts recorded credential values and contains no raw proof blobs.
+Recommendations use recorded remediation guidance, with an explicit request for guidance
+when it has not been supplied.
 
 ## Export a snapshot
 
@@ -86,6 +149,12 @@ JSON is now a report envelope with `format_version: 1`, `engagement`, `policy`, 
 `evidence_manifest` and `sections`. It replaces the previous raw engagement serialization
 and is **not a state backup**. Consumers of the former raw JSON export must adapt to this
 version. Stored engagement state is not migrated or overwritten by exporting a report.
+The new report fields are additive: `summary.resolved_findings` and
+`sections.findings.resolved` separate corrected findings from active risks. Finding
+ledgers now also accept the `resolved` status and optional remediation/retest fields.
+Older code rejects a ledger containing `resolved`; use a compatible reader and retain a
+private ledger/evidence backup before downgrading. All concurrent writers must use the
+new locking workflow; older binaries do not participate in its cooperative lock.
 Exports from the same state and ledger are deterministic; snapshot time comes from the
 stored state, not from an invented completion time. Pending records can be newer than
 that state timestamp, and each lifecycle finding includes its own recorded time.
@@ -128,12 +197,12 @@ concurrent promotion and real CLI exit codes. Run from the package directories:
 
 ```sh
 # packages/core
-bun test test/evidence-integrity.test.ts test/cyber.test.ts
+bun test test/evidence-integrity.test.ts test/finding-review.test.ts test/cyber.test.ts
 # packages/opencode
 bun test test/tool/trusted-reports.test.ts --timeout 30000
 ```
 
 The [competitor analysis](research/COMPETITORS-2026-10.md) motivates this work. Run budgets,
-complete run manifests, durable cancellation/resume and finding ownership with cross-run
-retest are further product priorities; this export and local preflight do not implement
-those workflows.
+complete run manifests, durable run cancellation/resume and comparison across engagements
+remain further product priorities. Ownership and evidence-backed operator retests within
+an engagement are implemented by the workflow above.

@@ -79,8 +79,13 @@ esplicitamente provider live e isolamento non verificati.
 
 La [guida operativa](../REPORTING.md) documenta contratto, compatibilità e limiti.
 Questa revisione registra la verifica dell'operatore e il materiale di replay, senza
-rieseguire autonomamente la prova. Non introduce budget di esecuzione, manifest completo,
-ownership o retest fra run; non dimostra superiorità di efficacia rispetto ai competitor.
+rieseguire autonomamente la prova. L'iterazione successiva implementa assegnatario, impatto,
+passi di riproduzione, remediation e retest con esiti risolto/ancora vulnerabile/inconcludente,
+tramite tool agente e CLI senza modello. Revisioni e prove originali rimangono consultabili;
+una chiusura richiede nuovo materiale e il report ricontrolla anche le prove storiche.
+Un lock fra processi impedisce scritture concorrenti del ledger. Non introduce budget di
+esecuzione, manifest completo o confronto automatico fra engagement; non dimostra
+superiorità di efficacia rispetto ai competitor.
 
 ## Limiti e criteri per un confronto futuro
 

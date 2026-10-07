@@ -514,3 +514,146 @@ it.live("doctor fails strict local checks when saved evidence has changed", () =
     expect(invalid.stdout).toContain("fails integrity checks")
   }),
 )
+
+it.live("the agent finding tool records remediation, retests and redacted revision history", () =>
+  Effect.gen(function* () {
+    const input = yield* fixture
+    const info = yield* FindingTool.pipe(
+      Effect.provide(Layer.mock(EngagementStore.Service, { get: () => Effect.succeed(input) })),
+    )
+    const tool = yield* info.init()
+    yield* tool.execute(
+      {
+        action: "promote",
+        key: "reviewed",
+        title: "Owned finding",
+        target: "127.0.0.1",
+        replay: "original proof",
+        impact: `Impact ${secret}`,
+      },
+      ctx,
+    )
+    const updated = yield* tool.execute(
+      {
+        action: "update",
+        key: "reviewed",
+        owner: "platform",
+        remediation: "Disable debug exposure",
+        reviewer: "operator",
+        note: "Assigned remediation",
+      },
+      ctx,
+    )
+    expect(updated.metadata.reportable).toBe(true)
+    expect(updated.output).not.toContain(secret)
+    const resolved = yield* tool.execute(
+      {
+        action: "retest",
+        key: "reviewed",
+        outcome: "resolved",
+        reviewer: "operator",
+        note: "Corrected owned endpoint",
+        replay: "new proof: endpoint returns 404",
+      },
+      ctx,
+    )
+    expect(resolved.metadata.status).toBe("resolved")
+    expect(resolved.metadata.reportable).toBe(false)
+    const list = yield* tool.execute({ action: "list" }, ctx)
+    expect(list.metadata.resolved).toBe(1)
+    expect(list.output).toContain("Disable debug exposure")
+    const reportInfo = yield* ReportGenTool.pipe(
+      Effect.provide(Layer.mock(EngagementStore.Service, { get: () => Effect.succeed(input) })),
+    )
+    const reportTool = yield* reportInfo.init()
+    const report = yield* reportTool.execute({ format: "json" }, ctx)
+    expect(report.metadata.resolved).toBe(1)
+    expect(report.metadata.reportable).toBe(0)
+    const history = yield* tool.execute({ action: "status", key: "reviewed" }, ctx)
+    expect(history.metadata.revisions).toBe(3)
+    expect(history.output).not.toContain(secret)
+    expect(history.output).toContain("Assigned remediation")
+  }),
+)
+
+it.live("real CLI promotes, assigns, resolves and exports history without a model", () =>
+  Effect.gen(function* () {
+    const input = yield* fixture
+    const dir = FindingStore.directory(input.name)
+    const proof = path.join(dir, "proof.txt")
+    yield* Effect.promise(async () => {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, "state.json"), JSON.stringify(input))
+      await fs.writeFile(proof, "2026-10-07 original owned command and result")
+    })
+    const common = ["findings", input.name, "--id", "cli-owned", "--reviewer", "operator", "--note", "Owned lab review"]
+    const promoted = yield* cli([
+      ...common,
+      "--action",
+      "promote",
+      "--target",
+      "127.0.0.1",
+      "--proof",
+      proof,
+      "--severity",
+      "high",
+    ])
+    expect(promoted.code).toBe(0)
+    expect(promoted.stdout).toContain('"reportable": true')
+    const original = (yield* Effect.promise(() => FindingStore.load(input.name)))[0]!
+    const assigned = yield* cli([
+      ...common,
+      "--action",
+      "update",
+      "--owner",
+      "platform-team",
+      "--impact",
+      `Exposure ${secret}`,
+      "--remediation",
+      "Remove debug route",
+      "--reproduction",
+      "Request owned endpoint",
+      "Check response",
+    ])
+    expect(assigned.code).toBe(0)
+    yield* Effect.promise(() => fs.writeFile(proof, "2026-10-08 retest owned command returns 404 after correction"))
+    const resolved = yield* cli([...common, "--action", "retest", "--outcome", "resolved", "--proof", proof])
+    expect(resolved.code).toBe(0)
+    expect(resolved.stdout).toContain('"status": "resolved"')
+    const report = yield* cli(["findings", input.name, "--json"])
+    expect(report.code).toBe(0)
+    expect(report.stdout).toContain('"resolved_findings": 1')
+    expect(report.stdout).toContain("Remove debug route")
+    expect(report.stdout).not.toContain(secret)
+    const history = yield* cli(["findings", input.name, "--action", "history", "--id", "cli-owned"])
+    expect(history.code).toBe(0)
+    expect(history.stdout).toContain(original.evidence_refs[0]!)
+    expect(history.stdout).toContain('"status": "verified"')
+    expect(history.stdout).toContain('"status": "resolved"')
+    expect(history.stdout).not.toContain(secret)
+  }),
+)
+
+it.live("real CLI refuses a mutation without a review and leaves the ledger unchanged", () =>
+  Effect.gen(function* () {
+    const input = yield* fixture
+    const dir = FindingStore.directory(input.name)
+    yield* Effect.promise(async () => {
+      await fs.mkdir(dir, { recursive: true })
+      await fs.writeFile(path.join(dir, "state.json"), JSON.stringify(input))
+    })
+    const invalid = yield* cli([
+      "findings",
+      input.name,
+      "--action",
+      "promote",
+      "--id",
+      "invalid",
+      "--target",
+      "127.0.0.1",
+    ])
+    expect(invalid.code).not.toBe(0)
+    expect(invalid.stderr).toContain("Provide --reviewer and --note")
+    expect(yield* Effect.promise(() => FindingStore.load(input.name))).toEqual([])
+  }),
+)
